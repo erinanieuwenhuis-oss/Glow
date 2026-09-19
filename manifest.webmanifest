@@ -1,0 +1,16 @@
+{
+  "name": "glōw — skin ritual tracker",
+  "short_name": "glōw",
+  "description": "Track your daily skincare routine, products, UV index, and skin progress.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#2e3f2e",
+  "theme_color": "#3d4f3d",
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
