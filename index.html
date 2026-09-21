@@ -77,12 +77,24 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 const DAYS_SHORT = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const PHOTO_TAGS = ["AM","PM","Progress","Reaction","Glow","Concern"];
 
+// Colour used for product notes so they stand out as reminders in the daily checklist
+const NOTE_COLOR = "#7b4fa0";
+
 // Body area / category selector (facial skin, body skin, hair)
 const CATEGORIES = [
   { id: "facial", icon: "🧖‍♀️", label: "Facial Skin" },
   { id: "body",   icon: "🧴",   label: "Body Skin" },
   { id: "hair",   icon: "💇‍♀️", label: "Hair" },
+  { id: "tiktok", icon: "🎬",   label: "TikTok Try" },
 ];
+
+// TikTok Try
+const TRIAL_LENGTHS = [7, 14, 21, 30];
+const TRIAL_IMPRESSIONS = ["😍 Better", "😐 No change", "😣 Worse"];
+const TRIAL_VERDICTS = {
+  worked: { label: "It worked", icon: "✅", color: "#5f8a63" },
+  show:   { label: "Just for show", icon: "🎭", color: "#c4604a" },
+};
 
 // UV protection recommendations
 const UV_LEVELS = [
@@ -99,6 +111,17 @@ const todayStr = () => new Date().toISOString().split("T")[0];
 const fmtDate = (d) => {
   const o = new Date(d + "T12:00:00");
   return { day: ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][o.getDay()], short: DAYS_SHORT[o.getDay()], date: o.getDate(), month: MONTHS[o.getMonth()], year: o.getFullYear() };
+};
+const addDaysStr = (d, n) => { const o = new Date(d + "T12:00:00"); o.setDate(o.getDate() + n); return o.toISOString().split("T")[0]; };
+const daysBetween = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 86400000);
+const shortDate = (d) => { const f = fmtDate(d); return `${f.month.slice(0, 3)} ${f.date}`; };
+// Progress of a running TikTok Try trial. endDate is the last day of the period; reflection is due from that day.
+const trialProgress = (t, today) => {
+  const dates = Array.from({ length: t.days || 0 }, (_, i) => addDaysStr(t.startDate, i));
+  const started = today >= t.startDate;
+  const elapsed = started ? Math.min(t.days, daysBetween(t.startDate, today) + 1) : 0;
+  const checked = dates.filter(d => t.checkins?.[d]).length;
+  return { dates, started, elapsed, checked, due: today >= t.endDate };
 };
 const getDaysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
 const getFirstDay = (y, m) => new Date(y, m, 1).getDay();
@@ -218,6 +241,23 @@ function App() {
   const [haircuts, setHaircuts] = useState(() => ls.get("glow_haircuts", []));
   const [haircutFreqWeeks, setHaircutFreqWeeks] = useState(() => ls.get("glow_haircut_freq", 6));
 
+  // Stock: every product the user owns, per category. Brand, notes, price etc. live in productMeta.
+  // First run after this update: seed stock from the products already in the routines/schedules.
+  // TikTok Try: trends and products being tried, each with a tracker, observations and a reflection
+  const [trials, setTrials] = useState(() => ls.get("glow_tiktok", []));
+
+  const [stock, setStock] = useState(() => {
+    const saved = ls.get("glow_stock", null);
+    if (saved) return { facial: saved.facial || [], body: saved.body || [], hair: saved.hair || [] };
+    const uniq = (a) => [...new Set(a)];
+    const p = ls.get("glow_products", { morning: [...DEFAULT_MORNING], evening: [...DEFAULT_EVENING] });
+    return {
+      facial: uniq([...(p.morning || []), ...(p.evening || [])]),
+      body: uniq(ls.get("glow_body_products", [...DEFAULT_BODY_PRODUCTS])),
+      hair: uniq(ls.get("glow_hair_products", [...DEFAULT_HAIR_PRODUCTS])),
+    };
+  });
+
   useEffect(() => { ls.set("glow_category", category); }, [category]);
   useEffect(() => { ls.set("glow_logs", logs); }, [logs]);
   useEffect(() => { ls.set("glow_products", products); }, [products]);
@@ -238,6 +278,8 @@ function App() {
   useEffect(() => { ls.set("glow_hair_reminders", hairReminders); }, [hairReminders]);
   useEffect(() => { ls.set("glow_haircuts", haircuts); }, [haircuts]);
   useEffect(() => { ls.set("glow_haircut_freq", haircutFreqWeeks); }, [haircutFreqWeeks]);
+  useEffect(() => { ls.set("glow_stock", stock); }, [stock]);
+  useEffect(() => { ls.set("glow_tiktok", trials); }, [trials]);
 
   // ── UV fetch
   const fetchUV = useCallback(async (lat, lon) => {
@@ -295,15 +337,19 @@ function App() {
   const [addingProd, setAddingProd] = useState(null);
   const addProduct = (period, name) => {
     const v = (name || newProd[period]).trim(); if (!v) return;
+    if (products[period].includes(v)) return;
     setProducts(p => ({ ...p, [period]: [...p[period], v] }));
-    setProductData(prev => ({ ...prev, [v]: initProductData() }));
-    setNewProd(p => ({ ...p, [period]: "" })); setAddingProd(null);
+    // keep existing tracker data if this product was used before
+    setProductData(prev => ({ ...prev, [v]: prev[v] || initProductData() }));
+    setStock(s => (s.facial || []).includes(v) ? s : { ...s, facial: [...(s.facial || []), v] });
+    setNewProd(p => ({ ...p, [period]: "" }));
   };
   const removeProd = (period, i) => setProducts(p => ({ ...p, [period]: p[period].filter((_, idx) => idx !== i) }));
   const renameFacialProduct = (period, oldName, newName) => {
     const v = (newName || "").trim();
     if (!v || v === oldName || products[period].includes(v)) return;
     setProducts(p => ({ ...p, [period]: p[period].map(n => n === oldName ? v : n) }));
+    setStock(s => ({ ...s, facial: (s.facial || []).map(n => n === oldName ? v : n) }));
     setProductData(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
     setIngredients(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
     setProductMeta(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
@@ -358,8 +404,9 @@ function App() {
   const addBodyProduct = (name) => {
     const v = (name || "").trim(); if (!v || bodyProducts.includes(v)) return;
     setBodyProducts(p => [...p, v]);
-    setBodySchedule(p => ({ ...p, [v]: [] }));
-    setBodyProductData(prev => ({ ...prev, [v]: initProductData() }));
+    setBodySchedule(p => ({ ...p, [v]: p[v] || [] }));
+    setBodyProductData(prev => ({ ...prev, [v]: prev[v] || initProductData() }));
+    setStock(s => (s.body || []).includes(v) ? s : { ...s, body: [...(s.body || []), v] });
   };
   const removeBodyProduct = (name) => {
     setBodyProducts(p => p.filter(n => n !== name));
@@ -369,6 +416,7 @@ function App() {
     const v = (newName || "").trim();
     if (!v || v === oldName || bodyProducts.includes(v)) return;
     setBodyProducts(p => p.map(n => n === oldName ? v : n));
+    setStock(s => ({ ...s, body: (s.body || []).map(n => n === oldName ? v : n) }));
     setBodySchedule(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
     setBodyProductData(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
     setIngredients(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
@@ -436,8 +484,9 @@ function App() {
   const addHairProduct = (name) => {
     const v = (name || "").trim(); if (!v || hairProducts.includes(v)) return;
     setHairProducts(p => [...p, v]);
-    setHairSchedule(p => ({ ...p, [v]: [] }));
-    setHairProductData(prev => ({ ...prev, [v]: initProductData() }));
+    setHairSchedule(p => ({ ...p, [v]: p[v] || [] }));
+    setHairProductData(prev => ({ ...prev, [v]: prev[v] || initProductData() }));
+    setStock(s => (s.hair || []).includes(v) ? s : { ...s, hair: [...(s.hair || []), v] });
   };
   const removeHairProduct = (name) => {
     setHairProducts(p => p.filter(n => n !== name));
@@ -447,6 +496,7 @@ function App() {
     const v = (newName || "").trim();
     if (!v || v === oldName || hairProducts.includes(v)) return;
     setHairProducts(p => p.map(n => n === oldName ? v : n));
+    setStock(s => ({ ...s, hair: (s.hair || []).map(n => n === oldName ? v : n) }));
     setHairSchedule(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
     setHairProductData(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
     setIngredients(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
@@ -496,6 +546,43 @@ function App() {
     return null;
   }).filter(Boolean);
 
+  // ── Stock helpers
+  const addToStock = (scope, name, brand, notes) => {
+    const v = (name || "").trim(); if (!v) return;
+    setStock(s => (s[scope] || []).includes(v) ? s : { ...s, [scope]: [...(s[scope] || []), v] });
+    const b = (brand || "").trim(), n = (notes || "").trim();
+    if (b || n) {
+      setProductMeta(p => {
+        const m = p[v] || { incompatible: [], price: "" };
+        return { ...p, [v]: { ...m, brand: b || m.brand || "", notes: n || m.notes || "" } };
+      });
+    }
+  };
+  const removeFromStock = (scope, name) => setStock(s => ({ ...s, [scope]: (s[scope] || []).filter(n => n !== name) }));
+  const renameStockItem = (scope, oldName, newName) => {
+    const v = (newName || "").trim();
+    if (!v || v === oldName || (stock[scope] || []).includes(v)) return;
+    // rename wherever the product is currently in use
+    if (scope === "facial") {
+      ["morning", "evening"].forEach(per => { if (products[per].includes(oldName)) renameFacialProduct(per, oldName, v); });
+    } else if (scope === "body") {
+      if (bodyProducts.includes(oldName)) renameBodyProduct(oldName, v);
+    } else {
+      if (hairProducts.includes(oldName)) renameHairProduct(oldName, v);
+    }
+    setStock(s => ({ ...s, [scope]: (s[scope] || []).map(n => n === oldName ? v : n) }));
+    // keep details attached even when the product isn't in a routine
+    const move = (setter) => setter(prev => { const c = { ...prev }; if (c[oldName]) { c[v] = c[oldName]; delete c[oldName]; } return c; });
+    move(setIngredients); move(setProductMeta);
+    if (scope === "facial") move(setProductData); else if (scope === "body") move(setBodyProductData); else move(setHairProductData);
+  };
+
+  // ── TikTok Try helpers
+  const addTrial = (t) => setTrials(p => [...p, { observations: [], checkins: {}, reflection: null, verdict: null, ...t, id: Date.now() }]);
+  const updateTrial = (id, patch) => setTrials(p => p.map(t => t.id === id ? { ...t, ...(typeof patch === "function" ? patch(t) : patch) } : t));
+  const removeTrial = (id) => setTrials(p => p.filter(t => t.id !== id));
+  const reflectionsDue = trials.filter(t => t.status === "active" && todayStr() >= t.endDate).length;
+
   // ── Haircut tracker
   const addHaircut = (entry) => setHaircuts(p => [...p, { ...entry, id: Date.now() }]);
   const removeHaircut = (id) => setHaircuts(p => p.filter(h => h.id !== id));
@@ -503,14 +590,15 @@ function App() {
   return (
     <div style={S.app}>
       <Header alerts={[...stockAlerts, ...bodyStockAlerts, ...hairStockAlerts]} />
-      <CategoryTabs category={category} setCategory={setCategory} />
+      <CategoryTabs category={category} setCategory={setCategory} badges={{ tiktok: reflectionsDue }} />
       <div style={S.content}>
         {category === "facial" && (
           <>
-            {tab === "today"      && <TodayPage selDate={selDate} setSelDate={setSelDate} getLog={getLog} updLog={updLog} toggleStep={toggleStep} products={products} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} completionRate={completionRate} saved={saved} ingredients={ingredients} productMeta={productMeta} photos={photos} addPhoto={addPhoto} setModal={setModal} uvData={uvData} uvLoading={uvLoading} requestLocation={requestLocation} productData={productData} setProductData={setProductData} stockAlerts={stockAlerts} />}
+            {tab === "today"      && <TodayPage selDate={selDate} setSelDate={setSelDate} getLog={getLog} updLog={updLog} toggleStep={toggleStep} products={products} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} completionRate={completionRate} saved={saved} ingredients={ingredients} productMeta={productMeta} photos={photos} addPhoto={addPhoto} setModal={setModal} uvData={uvData} uvLoading={uvLoading} requestLocation={requestLocation} productData={productData} setProductData={setProductData} stockAlerts={stockAlerts} stockItems={stock.facial} />}
             {tab === "calendar"   && <CalendarPage selDate={selDate} setSelDate={setSelDate} calMonth={calMonth} setCalMonth={setCalMonth} hasLog={hasLog} completionRate={completionRate} photos={photos} setTab={setTab} />}
             {tab === "photo"      && <PhotoLogPage photos={photos} setModal={setModal} addPhoto={addPhoto} removePhoto={removePhoto} selDate={selDate} />}
             {tab === "treatments" && <TreatmentsPage treatments={treatments} addTreatment={addTreatment} logTreatment={logTreatment} removeTreatment={removeTreatment} setModal={setModal} />}
+            {tab === "stock"      && <StockPage items={stock.facial} inUse={[...products.morning, ...products.evening]} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />}
             {tab === "insights"   && <InsightsPage logs={logs} products={products} streak={streak} completionRate={completionRate} hasLog={hasLog} ingredients={ingredients} treatments={treatments} productData={productData} setSelDate={setSelDate} setTab={setTab} />}
             {tab === "report"     && <ReportPage logs={logs} photos={photos} treatments={treatments} completionRate={completionRate} hasLog={hasLog} setSelDate={setSelDate} setTab={setTab} />}
           </>
@@ -528,8 +616,14 @@ function App() {
             productMeta={productMeta}
             bodyReminders={bodyReminders}
             enableBodyReminders={enableBodyReminders}
+            stockItems={stock.body}
+            addToStock={addToStock}
+            removeFromStock={removeFromStock}
             setModal={setModal}
           />
+        )}
+        {category === "tiktok" && (
+          <TikTokPage trials={trials} updateTrial={updateTrial} removeTrial={removeTrial} setModal={setModal} />
         )}
         {category === "hair" && (
           <HairPage
@@ -544,6 +638,9 @@ function App() {
             productMeta={productMeta}
             hairReminders={hairReminders}
             enableHairReminders={enableHairReminders}
+            stockItems={stock.hair}
+            addToStock={addToStock}
+            removeFromStock={removeFromStock}
             haircuts={haircuts}
             haircutFreqWeeks={haircutFreqWeeks}
             setHaircutFreqWeeks={setHaircutFreqWeeks}
@@ -553,7 +650,7 @@ function App() {
         )}
       </div>
       {category === "facial" && <NavBar tab={tab} setTab={setTab} alerts={stockAlerts.length} />}
-      {modal && <Modal modal={modal} setModal={setModal} ingredients={ingredients} setIngredients={setIngredients} productMeta={productMeta} setProductMeta={setProductMeta} renameFacialProduct={renameFacialProduct} renameBodyProduct={renameBodyProduct} renameHairProduct={renameHairProduct} addTreatment={addTreatment} addHaircut={addHaircut} addPhoto={addPhoto} selDate={selDate} productData={productData} setProductData={setProductData} bodyProductData={bodyProductData} setBodyProductData={setBodyProductData} hairProductData={hairProductData} setHairProductData={setHairProductData} />}
+      {modal && <Modal modal={modal} setModal={setModal} ingredients={ingredients} setIngredients={setIngredients} productMeta={productMeta} setProductMeta={setProductMeta} renameFacialProduct={renameFacialProduct} renameBodyProduct={renameBodyProduct} renameHairProduct={renameHairProduct} renameStockItem={renameStockItem} trials={trials} addTrial={addTrial} updateTrial={updateTrial} addTreatment={addTreatment} addHaircut={addHaircut} addPhoto={addPhoto} selDate={selDate} productData={productData} setProductData={setProductData} bodyProductData={bodyProductData} setBodyProductData={setBodyProductData} hairProductData={hairProductData} setHairProductData={setHairProductData} />}
     </div>
   );
 }
@@ -580,13 +677,14 @@ function Header({ alerts }) {
 }
 
 // ─── Category Tabs (Facial Skin / Body Skin / Hair) ────────────
-function CategoryTabs({ category, setCategory }) {
+function CategoryTabs({ category, setCategory, badges = {} }) {
   return (
     <div style={S.categoryBar}>
       {CATEGORIES.map(c => {
         const active = category === c.id;
         return (
           <button key={c.id} style={{ ...S.categoryBtn, ...(active ? S.categoryBtnActive : {}) }} onClick={() => setCategory(c.id)}>
+            {badges[c.id] > 0 && <span style={S.categoryBadge}>{badges[c.id]}</span>}
             <span style={S.categoryIcon}>{c.icon}</span>
             <span style={{ ...S.categoryLabel, ...(active ? S.categoryLabelActive : {}) }}>{c.label}</span>
           </button>
@@ -597,20 +695,12 @@ function CategoryTabs({ category, setCategory }) {
 }
 
 // ─── Body Skin: weekly product schedule ─────────────────────────
-function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProduct, addBodyProduct, removeBodyProduct, toggleBodyScheduleDay, bodyProductData, productMeta, bodyReminders, enableBodyReminders, setModal }) {
+function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProduct, addBodyProduct, removeBodyProduct, toggleBodyScheduleDay, bodyProductData, productMeta, bodyReminders, enableBodyReminders, stockItems, addToStock, removeFromStock, setModal }) {
   const today = todayStr();
   const todayCode = DAYS_SHORT[new Date().getDay()];
   const todayLog = bodyLogs[today] || {};
   const dueToday = bodyProducts.filter(n => (bodySchedule[n] || []).includes(todayCode));
   const [adding, setAdding] = useState(false);
-  const [newName, setNewName] = useState("");
-
-  const submitAdd = () => {
-    if (!newName.trim()) return;
-    addBodyProduct(newName);
-    setNewName("");
-    setAdding(false);
-  };
 
   return (
     <div style={S.page}>
@@ -656,6 +746,8 @@ function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProd
                       {isLow && <span style={S.lowBadge}>low</span>}
                       {isCalibrating && <span style={S.calBadge}>calibrating</span>}
                     </div>
+                    {meta?.brand && <div style={S.brandPreview}>{meta.brand}</div>}
+                    {meta?.notes && <div style={{ ...S.noteReminder, opacity: checked ? 0.55 : 1 }}>📌 {meta.notes}</div>}
                     {stockStatus && !isLow && <div style={S.stockPreview}>~{stockStatus.daysLeft}d left</div>}
                     {meta?.price && <div style={S.pricePreview}>💰 {meta.price}</div>}
                     {meta?.incompatible?.length > 0 && <div style={S.incompPreview}>⚠ avoid with {meta.incompatible.slice(0, 2).join(", ")}{meta.incompatible.length > 2 ? ` +${meta.incompatible.length - 2}` : ""}</div>}
@@ -683,6 +775,7 @@ function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProd
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                     <span style={{ fontSize: 13, fontWeight: "700", color: "#3a4a3a" }}>{name}</span>
+                    {meta?.brand && <span style={S.brandInline}>· {meta.brand}</span>}
                     {isLow && <span style={S.lowBadge}>low</span>}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -710,34 +803,25 @@ function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProd
           })}
         </div>
         {adding ? (
-          <div style={S.addRow}>
-            <input style={S.addInput} placeholder="Product name..." value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && submitAdd()} autoFocus />
-            <button style={S.addBtn} onClick={submitAdd}>Add</button>
-            <button style={S.cancelBtn} onClick={() => setAdding(false)}>✕</button>
-          </div>
+          <ProductPicker available={(stockItems || []).filter(n => !bodyProducts.includes(n))} productMeta={productMeta} onPick={addBodyProduct} onAddNew={(n) => { addBodyProduct(n); setAdding(false); }} onClose={() => setAdding(false)} />
         ) : (
           <button style={{ ...S.dashedBtn, marginTop: 14 }} onClick={() => setAdding(true)}>+ Add product</button>
         )}
       </div>
+
+      {/* Stock */}
+      <StockCard scope="body" items={stockItems || []} inUse={bodyProducts} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />
     </div>
   );
 }
 
 // ─── Hair: weekly product schedule + haircut tracker ────────────
-function HairPage({ hairProducts, hairSchedule, hairLogs, toggleHairProduct, addHairProduct, removeHairProduct, toggleHairScheduleDay, hairProductData, productMeta, hairReminders, enableHairReminders, haircuts, haircutFreqWeeks, setHaircutFreqWeeks, removeHaircut, setModal }) {
+function HairPage({ hairProducts, hairSchedule, hairLogs, toggleHairProduct, addHairProduct, removeHairProduct, toggleHairScheduleDay, hairProductData, productMeta, hairReminders, enableHairReminders, haircuts, haircutFreqWeeks, setHaircutFreqWeeks, removeHaircut, stockItems, addToStock, removeFromStock, setModal }) {
   const today = todayStr();
   const todayCode = DAYS_SHORT[new Date().getDay()];
   const todayLog = hairLogs[today] || {};
   const dueToday = hairProducts.filter(n => (hairSchedule[n] || []).includes(todayCode));
   const [adding, setAdding] = useState(false);
-  const [newName, setNewName] = useState("");
-
-  const submitAdd = () => {
-    if (!newName.trim()) return;
-    addHairProduct(newName);
-    setNewName("");
-    setAdding(false);
-  };
 
   const sortedCuts = [...haircuts].sort((a, b) => b.date.localeCompare(a.date));
   const lastCut = sortedCuts[0];
@@ -834,6 +918,8 @@ function HairPage({ hairProducts, hairSchedule, hairLogs, toggleHairProduct, add
                       {isLow && <span style={S.lowBadge}>low</span>}
                       {isCalibrating && <span style={S.calBadge}>calibrating</span>}
                     </div>
+                    {meta?.brand && <div style={S.brandPreview}>{meta.brand}</div>}
+                    {meta?.notes && <div style={{ ...S.noteReminder, opacity: checked ? 0.55 : 1 }}>📌 {meta.notes}</div>}
                     {stockStatus && !isLow && <div style={S.stockPreview}>~{stockStatus.daysLeft}d left</div>}
                     {meta?.price && <div style={S.pricePreview}>💰 {meta.price}</div>}
                     {meta?.incompatible?.length > 0 && <div style={S.incompPreview}>⚠ avoid with {meta.incompatible.slice(0, 2).join(", ")}{meta.incompatible.length > 2 ? ` +${meta.incompatible.length - 2}` : ""}</div>}
@@ -861,6 +947,7 @@ function HairPage({ hairProducts, hairSchedule, hairLogs, toggleHairProduct, add
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                     <span style={{ fontSize: 13, fontWeight: "700", color: "#3a4a3a" }}>{name}</span>
+                    {meta?.brand && <span style={S.brandInline}>· {meta.brand}</span>}
                     {isLow && <span style={S.lowBadge}>low</span>}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -888,16 +975,499 @@ function HairPage({ hairProducts, hairSchedule, hairLogs, toggleHairProduct, add
           })}
         </div>
         {adding ? (
-          <div style={S.addRow}>
-            <input style={S.addInput} placeholder="Product name..." value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && submitAdd()} autoFocus />
-            <button style={S.addBtn} onClick={submitAdd}>Add</button>
-            <button style={S.cancelBtn} onClick={() => setAdding(false)}>✕</button>
-          </div>
+          <ProductPicker available={(stockItems || []).filter(n => !hairProducts.includes(n))} productMeta={productMeta} onPick={addHairProduct} onAddNew={(n) => { addHairProduct(n); setAdding(false); }} onClose={() => setAdding(false)} />
         ) : (
           <button style={{ ...S.dashedBtn, marginTop: 14 }} onClick={() => setAdding(true)}>+ Add product</button>
         )}
       </div>
+
+      {/* Stock */}
+      <StockCard scope="hair" items={stockItems || []} inUse={hairProducts} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />
     </div>
+  );
+}
+
+// ─── Product Picker (choose from stock, or add a new product) ───
+function ProductPicker({ available, productMeta, onPick, onAddNew, onClose }) {
+  const [name, setName] = useState("");
+  const submit = () => { const v = name.trim(); if (!v) return; onAddNew(v); setName(""); };
+  return (
+    <div style={S.pickerWrap}>
+      <div style={S.pickerLabel}>Choose from your stock</div>
+      {available.length > 0 ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {available.map(n => (
+            <button key={n} style={S.pickChip} onClick={() => onPick(n)}>
+              <span>{n}</span>
+              {productMeta[n]?.brand && <span style={S.pickChipBrand}>{productMeta[n].brand}</span>}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={S.pickerEmpty}>Nothing left in your stock to add.</div>
+      )}
+      <div style={{ ...S.pickerLabel, marginTop: 14 }}>Or add a new product</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input style={S.addInput} placeholder="Product name..." value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
+        <button style={S.addBtn} onClick={submit}>Add</button>
+      </div>
+      <button style={{ ...S.cancelBtn, width: "100%", marginTop: 12 }} onClick={onClose}>Done</button>
+    </div>
+  );
+}
+
+// ─── Stock (all products the user owns for a category) ──────────
+function StockCard({ scope, items, inUse, productMeta, addToStock, removeFromStock, setModal }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [brand, setBrand] = useState("");
+  const [notes, setNotes] = useState("");
+  const [err, setErr] = useState("");
+
+  const submit = () => {
+    const v = name.trim(); if (!v) return;
+    if (items.some(n => n.toLowerCase() === v.toLowerCase())) { setErr("That product is already in your stock."); return; }
+    addToStock(scope, v, brand, notes);
+    setName(""); setBrand(""); setNotes(""); setErr(""); setAdding(false);
+  };
+  const remove = (n) => {
+    const msg = inUse.includes(n)
+      ? `Remove ${n} from your stock? It stays in your routine until you remove it there.`
+      : `Remove ${n} from your stock?`;
+    if (window.confirm(msg)) removeFromStock(scope, n);
+  };
+
+  return (
+    <div style={S.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ ...S.cardTitle, marginBottom: 0 }}>🧴 My Stock</div>
+        <span style={{ ...S.badge, background: "#7a9e7e22", color: "#5f8a63" }}>{items.length}</span>
+      </div>
+      <div style={{ fontSize: 11, color: "#9a8e7a", marginBottom: 6 }}>Everything you own — pick from here when building your routine.</div>
+
+      {items.length === 0 && <div style={S.emptySmall}>No products in stock yet</div>}
+      {items.map(n => {
+        const meta = productMeta[n];
+        return (
+          <div key={n} style={S.stockRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <span style={S.stockName}>{n}</span>
+                {inUse.includes(n) && <span style={S.inUseChip}>in routine</span>}
+              </div>
+              {meta?.brand && <div style={S.brandPreview}>{meta.brand}</div>}
+              {meta?.notes && <div style={S.noteReminder}>📌 {meta.notes}</div>}
+            </div>
+            <button style={S.iconBtn} title="Product details" onClick={() => setModal({ type: "productDetails", product: n, scope, fromStock: true })}>🧪</button>
+            <button style={S.removeBtn} title="Remove from stock" onClick={() => remove(n)}>×</button>
+          </div>
+        );
+      })}
+
+      {adding ? (
+        <div style={{ marginTop: 12 }}>
+          <div style={S.formGroup}>
+            <label style={S.formLabel}>Product Name</label>
+            <input style={S.formInput} placeholder="e.g. Hydrating Cleanser" value={name} onChange={e => { setName(e.target.value); setErr(""); }} autoFocus />
+          </div>
+          <div style={S.formGroup}>
+            <label style={S.formLabel}>Brand</label>
+            <input style={S.formInput} placeholder="e.g. CeraVe" value={brand} onChange={e => setBrand(e.target.value)} />
+          </div>
+          <div style={S.formGroup}>
+            <label style={{ ...S.formLabel, color: NOTE_COLOR }}>📌 Important Notes</label>
+            <textarea style={{ ...S.textarea, borderColor: NOTE_COLOR + "66" }} rows={2} placeholder="e.g. Night only · patch test first" value={notes} onChange={e => setNotes(e.target.value)} />
+          </div>
+          {err && <div style={{ fontSize: 12, color: "#c4604a", marginBottom: 8 }}>{err}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={S.cancelBtn} onClick={() => { setAdding(false); setErr(""); }}>Cancel</button>
+            <button style={{ ...S.primaryBtn, flex: 1 }} onClick={submit}>Add to stock</button>
+          </div>
+        </div>
+      ) : (
+        <button style={S.dashedBtn} onClick={() => setAdding(true)}>+ Add to stock</button>
+      )}
+    </div>
+  );
+}
+
+function StockPage({ items, inUse, productMeta, addToStock, removeFromStock, setModal }) {
+  return (
+    <div style={S.page}>
+      <div style={S.pageTitle}>Facial Stock</div>
+      <StockCard scope="facial" items={items} inUse={inUse} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />
+    </div>
+  );
+}
+
+// ─── TikTok Try ────────────────────────────────────────────────
+function TikTokPage({ trials, updateTrial, removeTrial, setModal }) {
+  const today = todayStr();
+  const isDue = (t) => t.status === "active" && today >= t.endDate;
+  const due = trials.filter(isDue);
+  const running = trials.filter(t => t.status === "active" && !isDue(t));
+  const ideas = trials.filter(t => t.status === "idea");
+  const done = trials.filter(t => t.status === "done").sort((a, b) => (b.reflection?.reflectedOn || "").localeCompare(a.reflection?.reflectedOn || ""));
+  const worked = done.filter(t => t.verdict === "worked").length;
+  const show = done.filter(t => t.verdict === "show").length;
+
+  const section = (title, list, tint) => list.length === 0 ? null : (
+    <div key={title} style={{ marginBottom: 18 }}>
+      <div style={{ ...S.monthLabel, ...(tint ? { color: tint } : {}) }}>{title} · {list.length}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {list.map(t => <TrialCard key={t.id} t={t} today={today} updateTrial={updateTrial} removeTrial={removeTrial} setModal={setModal} />)}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={S.page}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div style={{ ...S.pageTitle, marginBottom: 0 }}>TikTok Try</div>
+        <button style={S.primaryBtn} onClick={() => setModal({ type: "addTrial" })}>+ New</button>
+      </div>
+
+      {trials.length === 0 ? (
+        <div style={S.emptyState}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🎬</div>
+          <div style={S.emptyTitle}>Nothing to try yet</div>
+          <div style={S.emptySub}>Add a viral product or trend, set a trial period, track it, and decide if it actually worked or was just for show.</div>
+          <button style={{ ...S.primaryBtn, marginTop: 14 }} onClick={() => setModal({ type: "addTrial" })}>Add First Trial</button>
+        </div>
+      ) : (
+        <>
+          <div style={S.statsRow}>
+            {[["🔬 " + (running.length + due.length), "Trying"], ["✅ " + worked, "Worked"], ["🎭 " + show, "Just for show"]].map(([n, l]) => (
+              <div key={l} style={S.statBox}><div style={S.statNum}>{n}</div><div style={S.statLabel}>{l}</div></div>
+            ))}
+          </div>
+          {section("Reflection due", due, NOTE_COLOR)}
+          {section("Trying now", running)}
+          {section("To try", ideas)}
+          {section("Finished", done)}
+        </>
+      )}
+    </div>
+  );
+}
+
+function TrialCard({ t, today, updateTrial, removeTrial, setModal }) {
+  const [open, setOpen] = useState(false);
+  const isIdea = t.status === "idea";
+  const isDone = t.status === "done";
+  const p = isIdea ? null : trialProgress(t, today);
+  const inPeriod = p && p.started && today <= t.endDate;
+  const obs = [...(t.observations || [])].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+  const shownObs = open ? obs : obs.slice(0, 1);
+  const verdict = TRIAL_VERDICTS[t.verdict];
+
+  const toggleDay = (d) => updateTrial(t.id, (cur) => ({ checkins: { ...(cur.checkins || {}), [d]: !cur.checkins?.[d] } }));
+  const removeObs = (id) => updateTrial(t.id, (cur) => ({ observations: (cur.observations || []).filter(o => o.id !== id) }));
+  const remove = () => { if (window.confirm(`Remove "${t.name}" and everything you logged for it?`)) removeTrial(t.id); };
+
+  let badge = null;
+  if (isDone && verdict) badge = { text: `${verdict.icon} ${verdict.label}`, color: verdict.color };
+  else if (isIdea) badge = { text: "To try", color: "#9a9a8a" };
+  else if (!p.started) badge = { text: `Starts in ${daysBetween(today, t.startDate)}d`, color: "#9a9a8a" };
+  else if (p.due) badge = { text: "Reflection due", color: NOTE_COLOR };
+  else badge = { text: `Day ${p.elapsed}/${t.days}`, color: "#7a9e7e" };
+
+  return (
+    <div style={{ ...S.treatCard, ...(!isDone && !isIdea && p.due ? { border: `1.5px solid ${NOTE_COLOR}66` } : {}) }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={S.treatMeta}>{t.type === "trend" ? "✨ Trend" : "🧴 Product"}{t.area ? ` · ${t.area}` : ""}</div>
+          <div style={S.treatName}>{t.name}</div>
+          {t.brand && <div style={S.brandPreview}>{t.brand}</div>}
+          {t.claim && <div style={S.treatNotes}>“{t.claim}”</div>}
+          {t.notes && <div style={S.noteReminder}>📌 {t.notes}</div>}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          <span style={{ ...S.statusBadge, background: badge.color + "22", color: badge.color, whiteSpace: "nowrap" }}>{badge.text}</span>
+          <button style={S.removeBtn} title="Remove" onClick={remove}>×</button>
+        </div>
+      </div>
+
+      {isIdea && (
+        <button style={{ ...S.primaryBtn, width: "100%", marginTop: 12 }} onClick={() => setModal({ type: "startTrial", id: t.id })}>▶ Start trial</button>
+      )}
+
+      {!isIdea && (
+        <>
+          <div style={{ fontSize: 11, color: "#a09080", marginTop: 8 }}>
+            {shortDate(t.startDate)} – {shortDate(t.endDate)} · {t.days} days
+          </div>
+
+          {/* Tracker */}
+          <div style={S.trialSection}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={S.trialLabel}>📊 Tracker</span>
+              <span style={{ fontSize: 11, color: "#7a6e5a" }}>{p.checked} of {p.started ? p.elapsed : 0} days used</span>
+            </div>
+            <ProgressBar value={t.days ? p.elapsed / t.days : 0} color="#7a9e7e" />
+            <div style={S.trackGrid}>
+              {p.dates.map((d, i) => {
+                const on = !!t.checkins?.[d]; const future = d > today; const missed = !on && !future && d < today;
+                return (
+                  <button key={d} title={shortDate(d)} disabled={future || isDone} onClick={() => toggleDay(d)}
+                    style={{ ...S.trackCell, ...(on ? S.trackCellOn : {}), ...(missed ? S.trackCellMissed : {}), ...(d === today ? S.trackCellToday : {}), opacity: future ? 0.35 : 1 }}>
+                    {on ? "✓" : i + 1}
+                  </button>
+                );
+              })}
+            </div>
+            {!isDone && inPeriod && (
+              <button style={{ ...S.dashedBtn, marginTop: 10 }} onClick={() => toggleDay(today)}>
+                {t.checkins?.[today] ? "✓ Done today — tap to undo" : "✓ Check in today"}
+              </button>
+            )}
+          </div>
+
+          {/* Observations */}
+          <div style={S.trialSection}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={S.trialLabel}>📝 Observations ({obs.length})</span>
+              {!isDone && <button style={S.smallBtn} onClick={() => setModal({ type: "addObservation", id: t.id })}>+ Add</button>}
+            </div>
+            {obs.length === 0 && <div style={S.emptySmall}>Nothing noted yet</div>}
+            {shownObs.map(o => (
+              <div key={o.id} style={S.obsRow}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={S.obsDate}>{shortDate(o.date)}</span>
+                    {o.impression && <span style={S.obsTag}>{o.impression}</span>}
+                  </div>
+                  {o.text && <div style={S.obsText}>{o.text}</div>}
+                </div>
+                {!isDone && <button style={S.removeBtn} onClick={() => removeObs(o.id)}>×</button>}
+              </div>
+            ))}
+            {obs.length > 1 && (
+              <button style={S.linkBtn} onClick={() => setOpen(o => !o)}>{open ? "Show less" : `Show all ${obs.length}`}</button>
+            )}
+          </div>
+
+          {/* Reflection */}
+          {!isDone && (
+            <button style={{ ...(p.due ? S.primaryBtn : S.dashedBtn), width: "100%", marginTop: 10, ...(p.due ? { background: NOTE_COLOR } : {}) }} onClick={() => setModal({ type: "reflection", id: t.id })}>
+              {p.due ? "🪞 Reflect & decide" : "🪞 Reflect early"}
+            </button>
+          )}
+          {isDone && (
+            <div style={{ ...S.trialSection, background: (verdict?.color || "#7a9e7e") + "12" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ ...S.trialLabel, color: verdict?.color }}>🪞 Reflection · {t.reflection?.reflectedOn ? shortDate(t.reflection.reflectedOn) : ""}</span>
+                <button style={S.linkBtn} onClick={() => setModal({ type: "reflection", id: t.id })}>Edit</button>
+              </div>
+              {t.reflection?.text ? <div style={S.obsText}>{t.reflection.text}</div> : <div style={S.emptySmall}>No written reflection</div>}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function LengthPicker({ days, setDays }) {
+  const [custom, setCustom] = useState("");
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      {TRIAL_LENGTHS.map(n => (
+        <button key={n} style={{ ...S.filterChip, ...(days === n && !custom ? S.filterChipActive : {}) }} onClick={() => { setCustom(""); setDays(n); }}>{n} days</button>
+      ))}
+      <input type="number" min="1" max="90" style={{ ...S.formInput, width: 84, padding: "5px 10px", ...(custom ? { borderColor: "#4a5c4a" } : {}) }} placeholder="Custom" value={custom}
+        onChange={e => { setCustom(e.target.value); const v = parseInt(e.target.value, 10); setDays(isNaN(v) ? 0 : Math.min(90, Math.max(0, v))); }} />
+    </div>
+  );
+}
+
+function AddTrialModal({ addTrial, close }) {
+  const [type, setType] = useState("product");
+  const [name, setName] = useState("");
+  const [brand, setBrand] = useState("");
+  const [claim, setClaim] = useState("");
+  const [notes, setNotes] = useState("");
+  const [area, setArea] = useState(null);
+  const [days, setDays] = useState(14);
+  const [startDate, setStartDate] = useState(todayStr());
+  const ready = name.trim().length > 0;
+  const base = () => ({ type, name: name.trim(), brand: type === "product" ? brand.trim() : "", claim: claim.trim(), notes: notes.trim(), area, createdAt: todayStr() });
+
+  const saveLater = () => { if (!ready) return; addTrial({ ...base(), status: "idea", days: null, startDate: null, endDate: null }); close(); };
+  const start = () => {
+    if (!ready || !days || !startDate) return;
+    addTrial({ ...base(), status: "active", days, startDate, endDate: addDaysStr(startDate, days - 1) });
+    close();
+  };
+
+  return (
+    <Overlay close={close}>
+      <div style={S.modalTitle}>🎬 New TikTok Try</div>
+      <div style={S.modalSub}>Something you saw and want to test for yourself</div>
+
+      <div style={S.formGroup}>
+        <div style={{ display: "flex", gap: 8 }}>
+          {[["product", "🧴 Product"], ["trend", "✨ Trend"]].map(([id, label]) => (
+            <button key={id} style={{ ...S.filterChip, flex: 1, padding: "8px 0", ...(type === id ? S.filterChipActive : {}) }} onClick={() => setType(id)}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>{type === "product" ? "Product Name" : "Trend Name"}</label>
+        <input style={S.formInput} placeholder={type === "product" ? "e.g. Glass Skin Serum" : "e.g. Rice water rinse"} value={name} onChange={e => setName(e.target.value)} autoFocus />
+      </div>
+      {type === "product" && (
+        <div style={S.formGroup}>
+          <label style={S.formLabel}>Brand</label>
+          <input style={S.formInput} placeholder="e.g. CeraVe" value={brand} onChange={e => setBrand(e.target.value)} />
+        </div>
+      )}
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>What it claims</label>
+        <textarea style={{ ...S.textarea, height: 58 }} placeholder="What it promises, or where you saw it" value={claim} onChange={e => setClaim(e.target.value)} />
+      </div>
+      <div style={S.formGroup}>
+        <label style={{ ...S.formLabel, color: NOTE_COLOR }}>📌 Important Notes</label>
+        <textarea style={{ ...S.textarea, height: 58, borderColor: NOTE_COLOR + "66" }} placeholder="e.g. Patch test first · avoid with retinol" value={notes} onChange={e => setNotes(e.target.value)} />
+      </div>
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>Area (optional)</label>
+        <TagPicker tags={TREATMENT_CATEGORIES} value={area} onChange={setArea} color="#7a9e7e" />
+      </div>
+
+      <div style={S.trialSection}>
+        <div style={S.formGroup}>
+          <label style={S.formLabel}>Trial period</label>
+          <LengthPicker days={days} setDays={setDays} />
+        </div>
+        <div style={{ ...S.formGroup, marginBottom: 0 }}>
+          <label style={S.formLabel}>Start date</label>
+          <input type="date" style={S.formInput} value={startDate} onChange={e => setStartDate(e.target.value)} />
+        </div>
+      </div>
+
+      <div style={S.modalBtns}>
+        <button style={{ ...S.cancelBtn, opacity: ready ? 1 : 0.5 }} disabled={!ready} onClick={saveLater}>Save for later</button>
+        <button style={{ ...S.primaryBtn, flex: 1, opacity: ready && days ? 1 : 0.5 }} disabled={!ready || !days} onClick={start}>▶ Start trial</button>
+      </div>
+    </Overlay>
+  );
+}
+
+function StartTrialModal({ trial, updateTrial, close }) {
+  const [days, setDays] = useState(14);
+  const [startDate, setStartDate] = useState(todayStr());
+  const go = () => {
+    if (!days || !startDate) return;
+    updateTrial(trial.id, { status: "active", days, startDate, endDate: addDaysStr(startDate, days - 1) });
+    close();
+  };
+  return (
+    <Overlay close={close}>
+      <div style={S.modalTitle}>▶ Start Trial</div>
+      <div style={S.modalSub}>{trial.name}</div>
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>Trial period</label>
+        <LengthPicker days={days} setDays={setDays} />
+      </div>
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>Start date</label>
+        <input type="date" style={S.formInput} value={startDate} onChange={e => setStartDate(e.target.value)} />
+      </div>
+      <div style={S.modalBtns}>
+        <button style={S.cancelBtn} onClick={close}>Cancel</button>
+        <button style={{ ...S.primaryBtn, flex: 1, opacity: days ? 1 : 0.5 }} disabled={!days} onClick={go}>Start</button>
+      </div>
+    </Overlay>
+  );
+}
+
+function AddObservationModal({ trial, updateTrial, close }) {
+  const [date, setDate] = useState(todayStr());
+  const [impression, setImpression] = useState(null);
+  const [text, setText] = useState("");
+  const ready = !!date && (text.trim() || impression);
+  const save = () => {
+    if (!ready) return;
+    updateTrial(trial.id, (cur) => ({ observations: [...(cur.observations || []), { id: Date.now(), date, impression, text: text.trim() }] }));
+    close();
+  };
+  return (
+    <Overlay close={close}>
+      <div style={S.modalTitle}>📝 Add Observation</div>
+      <div style={S.modalSub}>{trial.name}</div>
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>Date</label>
+        <input type="date" style={S.formInput} value={date} max={todayStr()} onChange={e => setDate(e.target.value)} />
+      </div>
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>How does it look / feel?</label>
+        <TagPicker tags={TRIAL_IMPRESSIONS} value={impression} onChange={setImpression} color="#7a9e7e" />
+      </div>
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>What did you notice?</label>
+        <textarea style={{ ...S.textarea, height: 90 }} placeholder="Texture, reactions, results, anything that stood out..." value={text} onChange={e => setText(e.target.value)} />
+      </div>
+      <div style={S.modalBtns}>
+        <button style={S.cancelBtn} onClick={close}>Cancel</button>
+        <button style={{ ...S.primaryBtn, flex: 1, opacity: ready ? 1 : 0.5 }} disabled={!ready} onClick={save}>Save</button>
+      </div>
+    </Overlay>
+  );
+}
+
+function ReflectionModal({ trial, updateTrial, close }) {
+  const today = todayStr();
+  const p = trialProgress(trial, today);
+  const [text, setText] = useState(trial.reflection?.text || "");
+  const [verdict, setVerdict] = useState(trial.verdict || null);
+  const obs = trial.observations || [];
+  const counts = TRIAL_IMPRESSIONS.map(t => [t, obs.filter(o => o.impression === t).length]).filter(([, n]) => n > 0);
+  const early = !p.due && trial.status !== "done";
+
+  const save = () => {
+    if (!verdict) return;
+    updateTrial(trial.id, { status: "done", verdict, reflection: { text: text.trim(), reflectedOn: trial.reflection?.reflectedOn || today } });
+    close();
+  };
+
+  return (
+    <Overlay close={close}>
+      <div style={S.modalTitle}>🪞 Reflection</div>
+      <div style={S.modalSub}>{trial.name}{early ? " · reflecting before the period ends" : ""}</div>
+
+      <div style={S.trackerSection}>
+        <div style={S.trackerRow}><span>Period</span><span>{shortDate(trial.startDate)} – {shortDate(trial.endDate)}</span></div>
+        <div style={S.trackerRow}><span>Days used</span><span>{p.checked} of {p.started ? p.elapsed : 0}</span></div>
+        <div style={{ ...S.trackerRow, borderBottom: "none" }}><span>Observations</span><span>{obs.length}{counts.length ? ` · ${counts.map(([t, n]) => `${n} ${t.split(" ").slice(1).join(" ").toLowerCase()}`).join(", ")}` : ""}</span></div>
+      </div>
+      {trial.claim && <div style={{ ...S.treatNotes, marginBottom: 12 }}>It claimed: “{trial.claim}”</div>}
+
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>How did it go?</label>
+        <textarea style={{ ...S.textarea, height: 110 }} placeholder="Did it deliver on what it promised? What changed? Would you do it again?" value={text} onChange={e => setText(e.target.value)} />
+      </div>
+
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>Your verdict</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          {Object.entries(TRIAL_VERDICTS).map(([id, v]) => {
+            const active = verdict === id;
+            return (
+              <button key={id} style={{ ...S.verdictBtn, ...(active ? { background: v.color, borderColor: v.color, color: "#fff" } : { color: v.color, borderColor: v.color + "66" }) }} onClick={() => setVerdict(id)}>
+                <span style={{ fontSize: 20 }}>{v.icon}</span>
+                <span>{v.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={S.modalBtns}>
+        <button style={S.cancelBtn} onClick={close}>Cancel</button>
+        <button style={{ ...S.primaryBtn, flex: 1, opacity: verdict ? 1 : 0.5 }} disabled={!verdict} onClick={save}>{trial.status === "done" ? "Save changes" : "Finish trial"}</button>
+      </div>
+    </Overlay>
   );
 }
 
@@ -908,6 +1478,7 @@ function NavBar({ tab, setTab, alerts }) {
     { id: "calendar", icon: "🗓", label: "Calendar" },
     { id: "photo", icon: "📷", label: "Photos" },
     { id: "treatments", icon: "💆", label: "Care" },
+    { id: "stock", icon: "🧴", label: "Stock" },
     { id: "insights", icon: "📊", label: "Insights" },
     { id: "report", icon: "📋", label: "Report" },
   ];
@@ -1020,7 +1591,7 @@ function StockAlertBanner({ alerts, setModal, productData, setProductData }) {
 }
 
 // ─── Today Page ───────────────────────────────────────────────
-function TodayPage({ selDate, getLog, updLog, toggleStep, products, newProd, setNewProd, addingProd, setAddingProd, addProduct, removeProd, completionRate, saved, ingredients, productMeta, photos, addPhoto, setModal, uvData, uvLoading, requestLocation, productData, setProductData, stockAlerts }) {
+function TodayPage({ selDate, getLog, updLog, toggleStep, products, newProd, setNewProd, addingProd, setAddingProd, addProduct, removeProd, completionRate, saved, ingredients, productMeta, photos, addPhoto, setModal, uvData, uvLoading, requestLocation, productData, setProductData, stockAlerts, stockItems }) {
   const log = getLog(selDate);
   const rate = completionRate(selDate);
   const fmt = fmtDate(selDate);
@@ -1069,8 +1640,8 @@ function TodayPage({ selDate, getLog, updLog, toggleStep, products, newProd, set
       {/* Stock Alerts */}
       <StockAlertBanner alerts={stockAlerts} setModal={setModal} productData={productData} setProductData={setProductData} />
 
-      <RoutineBlock period="morning" label="🌅 Morning" products={products.morning} log={log} toggleStep={toggleStep} selDate={selDate} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} ingredients={ingredients} productMeta={productMeta} productData={productData} setModal={setModal} />
-      <RoutineBlock period="evening" label="🌙 Evening" products={products.evening} log={log} toggleStep={toggleStep} selDate={selDate} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} ingredients={ingredients} productMeta={productMeta} productData={productData} setModal={setModal} />
+      <RoutineBlock period="morning" label="🌅 Morning" products={products.morning} log={log} toggleStep={toggleStep} selDate={selDate} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} ingredients={ingredients} productMeta={productMeta} productData={productData} setModal={setModal} stockItems={stockItems} />
+      <RoutineBlock period="evening" label="🌙 Evening" products={products.evening} log={log} toggleStep={toggleStep} selDate={selDate} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} ingredients={ingredients} productMeta={productMeta} productData={productData} setModal={setModal} stockItems={stockItems} />
 
       <div style={S.card}>
         <div style={S.cardTitle}>🪞 Skin Condition</div>
@@ -1127,7 +1698,7 @@ function TodayPage({ selDate, getLog, updLog, toggleStep, products, newProd, set
 }
 
 // ─── Routine Block ────────────────────────────────────────────
-function RoutineBlock({ period, label, products, log, toggleStep, selDate, newProd, setNewProd, addingProd, setAddingProd, addProduct, removeProd, ingredients, productMeta, productData, setModal }) {
+function RoutineBlock({ period, label, products, log, toggleStep, selDate, newProd, setNewProd, addingProd, setAddingProd, addProduct, removeProd, ingredients, productMeta, productData, setModal, stockItems }) {
   const periodLog = log[period] || {};
   const done = products.filter(s => periodLog[s]).length;
   const color = period === "morning" ? "#c4a86a" : "#7a9e7e";
@@ -1161,6 +1732,8 @@ function RoutineBlock({ period, label, products, log, toggleStep, selDate, newPr
                     {isLow && <span style={S.lowBadge}>low</span>}
                     {isCalibrating && <span style={S.calBadge}>calibrating</span>}
                   </div>
+                  {meta?.brand && <div style={S.brandPreview}>{meta.brand}</div>}
+                  {meta?.notes && <div style={{ ...S.noteReminder, opacity: periodLog[step] ? 0.55 : 1 }}>📌 {meta.notes}</div>}
                   {hasIngr && <div style={S.ingrPreview}>{ingredients[step].slice(0, 3).join(" · ")}{ingredients[step].length > 3 ? ` +${ingredients[step].length - 3}` : ""}</div>}
                   {stockStatus && !isLow && <div style={S.stockPreview}>~{stockStatus.daysLeft}d left</div>}
                   {meta?.price && <div style={S.pricePreview}>💰 {meta.price}</div>}
@@ -1176,11 +1749,7 @@ function RoutineBlock({ period, label, products, log, toggleStep, selDate, newPr
         })}
       </div>
       {addingProd === period ? (
-        <div style={S.addRow}>
-          <input style={S.addInput} placeholder="Product name..." value={newProd[period]} onChange={e => setNewProd(p => ({ ...p, [period]: e.target.value }))} onKeyDown={e => e.key === "Enter" && addProduct(period)} autoFocus />
-          <button style={S.addBtn} onClick={() => addProduct(period)}>Add</button>
-          <button style={S.cancelBtn} onClick={() => setAddingProd(null)}>✕</button>
-        </div>
+        <ProductPicker available={(stockItems || []).filter(n => !products.includes(n))} productMeta={productMeta} onPick={(n) => addProduct(period, n)} onAddNew={(n) => { addProduct(period, n); setAddingProd(null); }} onClose={() => setAddingProd(null)} />
       ) : (
         <button style={S.dashedBtn} onClick={() => setAddingProd(period)}>+ Add product</button>
       )}
@@ -1756,15 +2325,25 @@ function ReportPage({ logs, photos, treatments, completionRate, hasLog, setSelDa
 }
 
 // ─── Modal Router ─────────────────────────────────────────────
-function Modal({ modal, setModal, ingredients, setIngredients, productMeta, setProductMeta, renameFacialProduct, renameBodyProduct, renameHairProduct, addTreatment, addHaircut, addPhoto, selDate, productData, setProductData, bodyProductData, setBodyProductData, hairProductData, setHairProductData }) {
+function Modal({ modal, setModal, ingredients, setIngredients, productMeta, setProductMeta, renameFacialProduct, renameBodyProduct, renameHairProduct, renameStockItem, trials, addTrial, updateTrial, addTreatment, addHaircut, addPhoto, selDate, productData, setProductData, bodyProductData, setBodyProductData, hairProductData, setHairProductData }) {
   const close = () => setModal(null);
   if (modal.type === "productDetails") {
-    const onRename = modal.scope === "body"
+    const onRename = modal.fromStock
+      ? (newName) => { renameStockItem(modal.scope, modal.product, newName); close(); }
+      : modal.scope === "body"
       ? (newName) => { renameBodyProduct(modal.product, newName); close(); }
       : modal.scope === "hair"
       ? (newName) => { renameHairProduct(modal.product, newName); close(); }
       : (newName) => { renameFacialProduct(modal.period, modal.product, newName); close(); };
     return <ProductDetailsModal product={modal.product} ingredients={ingredients} setIngredients={setIngredients} productMeta={productMeta} setProductMeta={setProductMeta} onRename={onRename} close={close} />;
+  }
+  if (modal.type === "addTrial") return <AddTrialModal addTrial={addTrial} close={close} />;
+  if (modal.type === "startTrial" || modal.type === "addObservation" || modal.type === "reflection") {
+    const trial = (trials || []).find(t => t.id === modal.id);
+    if (!trial) return null;
+    if (modal.type === "startTrial") return <StartTrialModal trial={trial} updateTrial={updateTrial} close={close} />;
+    if (modal.type === "addObservation") return <AddObservationModal trial={trial} updateTrial={updateTrial} close={close} />;
+    return <ReflectionModal trial={trial} updateTrial={updateTrial} close={close} />;
   }
   if (modal.type === "addTreatment") return <AddTreatmentModal addTreatment={addTreatment} close={close} />;
   if (modal.type === "addHaircut") return <AddHaircutModal addHaircut={addHaircut} close={close} />;
@@ -1885,6 +2464,8 @@ function ProductDetailsModal({ product, ingredients, setIngredients, productMeta
   const [incompRaw, setIncompRaw] = useState((meta.incompatible || []).join(", "));
   const [newIncomp, setNewIncomp] = useState("");
   const [price, setPrice] = useState(meta.price || "");
+  const [brand, setBrand] = useState(meta.brand || "");
+  const [notes, setNotes] = useState(meta.notes || "");
   const [nameInput, setNameInput] = useState(product);
 
   const ingrList = () => raw.split(",").map(s => s.trim()).filter(Boolean);
@@ -1895,7 +2476,7 @@ function ProductDetailsModal({ product, ingredients, setIngredients, productMeta
 
   const save = () => {
     setIngredients(p => ({ ...p, [product]: ingrList() }));
-    setProductMeta(p => ({ ...p, [product]: { incompatible: incompList(), price: price.trim() } }));
+    setProductMeta(p => ({ ...p, [product]: { ...(p[product] || {}), incompatible: incompList(), price: price.trim(), brand: brand.trim(), notes: notes.trim() } }));
     close();
   };
 
@@ -1912,6 +2493,17 @@ function ProductDetailsModal({ product, ingredients, setIngredients, productMeta
           <input style={{ ...S.formInput, flex: 1 }} value={nameInput} onChange={e => setNameInput(e.target.value)} />
           <button style={{ ...S.addBtn, opacity: (!nameInput.trim() || nameInput.trim() === product) ? 0.5 : 1 }} onClick={saveName} disabled={!nameInput.trim() || nameInput.trim() === product}>Rename</button>
         </div>
+      </div>
+
+      <div style={S.formGroup}>
+        <label style={S.formLabel}>Brand</label>
+        <input style={S.formInput} placeholder="e.g. CeraVe" value={brand} onChange={e => setBrand(e.target.value)} />
+      </div>
+
+      <div style={S.formGroup}>
+        <label style={{ ...S.formLabel, color: NOTE_COLOR }}>📌 Important Notes</label>
+        <textarea style={{ ...S.textarea, height: 64, borderColor: NOTE_COLOR + "66" }} placeholder="e.g. Night only · patch test first · avoid eye area" value={notes} onChange={e => setNotes(e.target.value)} />
+        <div style={{ fontSize: 11, color: "#9a8e7a", marginTop: 4 }}>Shown as a reminder in your daily checklist.</div>
       </div>
 
       <div style={S.formGroup}>
@@ -2092,7 +2684,7 @@ const S = {
   alertPill:{ background:"rgba(255,255,255,0.12)", borderRadius:20, padding:"4px 10px", display:"flex", alignItems:"center", gap:4 },
   // Category selector (Facial Skin / Body Skin / Hair)
   categoryBar:{ display:"flex", gap:8, padding:"12px 14px", background:"#ede6d8", borderBottom:"1px solid #e0d8cc" },
-  categoryBtn:{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, background:"#faf7f2", border:"1.5px solid #e0d8cc", borderRadius:14, padding:"10px 4px", cursor:"pointer", fontFamily:"inherit" },
+  categoryBtn:{ position:"relative", flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, background:"#faf7f2", border:"1.5px solid #e0d8cc", borderRadius:14, padding:"10px 4px", cursor:"pointer", fontFamily:"inherit" },
   categoryBtnActive:{ background:"#4a5c4a", borderColor:"#4a5c4a", boxShadow:"0 3px 10px rgba(74,92,74,0.25)" },
   categoryIcon:{ fontSize:19 },
   categoryLabel:{ fontSize:10, fontWeight:"700", color:"#6a5e4e", letterSpacing:"0.02em", textAlign:"center", lineHeight:1.2 },
@@ -2103,7 +2695,7 @@ const S = {
   nav:{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, background:"#faf7f2", borderTop:"1px solid #e0d8cc", display:"flex", padding:"6px 0 10px", zIndex:100 },
   navBtn:{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", background:"none", border:"none", cursor:"pointer", padding:"2px 0", gap:1 },
   navIcon:{ fontSize:18 },
-  navLabel:{ fontSize:9, letterSpacing:"0.08em", textTransform:"uppercase", color:"#a09080" },
+  navLabel:{ fontSize:8, letterSpacing:"0.04em", textTransform:"uppercase", color:"#a09080" },
   navLabelActive:{ color:"#4a5c4a", fontWeight:"700" },
   navAlert:{ position:"absolute", top:-4, right:-6, background:"#d4846a", color:"#fff", fontSize:9, borderRadius:"50%", width:15, height:15, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:"700" },
   page:{ padding:"16px 14px" },
@@ -2138,6 +2730,31 @@ const S = {
   stockPreview:{ fontSize:10, color:"#7a9e7e", marginTop:1 },
   pricePreview:{ fontSize:10, color:"#7a6e5a", marginTop:1 },
   incompPreview:{ fontSize:10, color:"#c4604a", marginTop:1 },
+  categoryBadge:{ position:"absolute", top:4, right:6, background:NOTE_COLOR, color:"#fff", fontSize:9, borderRadius:"50%", width:15, height:15, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:"700" },
+  trialSection:{ background:"#f5f0e8", borderRadius:12, padding:"10px 12px", marginTop:10 },
+  trialLabel:{ fontSize:11, fontWeight:"700", color:"#6a5e4e", letterSpacing:"0.06em", textTransform:"uppercase" },
+  trackGrid:{ display:"flex", flexWrap:"wrap", gap:4, marginTop:10 },
+  trackCell:{ width:26, height:26, borderRadius:7, border:"1.5px solid #d8d0c2", background:"#fff", color:"#9a8e7a", fontSize:10, fontFamily:"inherit", cursor:"pointer", padding:0, display:"flex", alignItems:"center", justifyContent:"center" },
+  trackCellOn:{ background:"#7a9e7e", borderColor:"#7a9e7e", color:"#fff", fontWeight:"700" },
+  trackCellMissed:{ borderColor:"#e6c4b8", background:"#fbf3ef" },
+  trackCellToday:{ boxShadow:"0 0 0 2px #4a5c4a55" },
+  obsRow:{ display:"flex", alignItems:"flex-start", gap:8, padding:"6px 0", borderTop:"1px solid #ebe4d8" },
+  obsDate:{ fontSize:11, fontWeight:"700", color:"#6a5e4e" },
+  obsTag:{ fontSize:10, background:"#e8f0e8", color:"#4a5c4a", borderRadius:10, padding:"1px 7px" },
+  obsText:{ fontSize:12, color:"#4a4a3a", lineHeight:1.5, marginTop:2, whiteSpace:"pre-wrap" },
+  linkBtn:{ background:"none", border:"none", color:"#7a9e7e", fontSize:12, cursor:"pointer", fontFamily:"inherit", padding:"4px 0", fontWeight:"700" },
+  verdictBtn:{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:"#faf7f2", border:"2px solid", borderRadius:14, padding:"12px 6px", fontSize:13, fontWeight:"700", cursor:"pointer", fontFamily:"inherit" },
+  brandPreview:{ fontSize:11, color:"#8a7e6a", fontStyle:"italic", marginTop:1 },
+  brandInline:{ fontSize:11, color:"#8a7e6a", fontStyle:"italic" },
+  noteReminder:{ fontSize:11, color:NOTE_COLOR, background:NOTE_COLOR+"14", borderLeft:`3px solid ${NOTE_COLOR}`, borderRadius:6, padding:"4px 8px", marginTop:4, lineHeight:1.45, whiteSpace:"pre-wrap" },
+  stockRow:{ display:"flex", alignItems:"flex-start", gap:8, padding:"10px 0", borderBottom:"1px solid #f5f0e8" },
+  stockName:{ fontSize:14, fontWeight:"700", color:"#3a4a3a" },
+  inUseChip:{ fontSize:9, background:"#7a9e7e22", color:"#5f8a63", borderRadius:6, padding:"1px 5px", fontWeight:"700", letterSpacing:"0.06em" },
+  pickerWrap:{ marginTop:12, background:"#f5f0e8", borderRadius:12, padding:12 },
+  pickerLabel:{ fontSize:10, color:"#7a6e5a", letterSpacing:"0.08em", textTransform:"uppercase", fontWeight:"700", marginBottom:6 },
+  pickerEmpty:{ fontSize:12, color:"#a09080", fontStyle:"italic" },
+  pickChip:{ background:"#fff", border:"1.5px solid #c8d4b8", borderRadius:18, padding:"5px 11px", fontSize:12, color:"#3a4a3a", cursor:"pointer", fontFamily:"inherit", display:"inline-flex", alignItems:"baseline", gap:5 },
+  pickChipBrand:{ fontSize:10, color:"#9a8e7a", fontStyle:"italic" },
   lowBadge:{ fontSize:9, background:"#d4846a22", color:"#d4846a", borderRadius:6, padding:"1px 5px", fontWeight:"700", letterSpacing:"0.06em" },
   calBadge:{ fontSize:9, background:"#c4a86a22", color:"#c4a86a", borderRadius:6, padding:"1px 5px", fontWeight:"700", letterSpacing:"0.06em" },
   iconBtn:{ background:"none", border:"none", cursor:"pointer", fontSize:13, padding:"2px 2px", opacity:0.55 },
