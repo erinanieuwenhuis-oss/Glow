@@ -86,6 +86,7 @@ const CATEGORIES = [
   { id: "body",   icon: "🧴",   label: "Body Skin" },
   { id: "hair",   icon: "💇‍♀️", label: "Hair" },
   { id: "tiktok", icon: "🎬",   label: "TikTok Try" },
+  { id: "oral",   icon: "🦷",   label: "Oral Care" },
 ];
 
 // TikTok Try
@@ -599,6 +600,7 @@ function App() {
             {tab === "photo"      && <PhotoLogPage photos={photos} setModal={setModal} addPhoto={addPhoto} removePhoto={removePhoto} selDate={selDate} />}
             {tab === "treatments" && <TreatmentsPage treatments={treatments} addTreatment={addTreatment} logTreatment={logTreatment} removeTreatment={removeTreatment} setModal={setModal} />}
             {tab === "stock"      && <StockPage items={stock.facial} inUse={[...products.morning, ...products.evening]} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />}
+            {tab === "rituals"    && <RitualsPage />}
             {tab === "insights"   && <InsightsPage logs={logs} products={products} streak={streak} completionRate={completionRate} hasLog={hasLog} ingredients={ingredients} treatments={treatments} productData={productData} setSelDate={setSelDate} setTab={setTab} />}
             {tab === "report"     && <ReportPage logs={logs} photos={photos} treatments={treatments} completionRate={completionRate} hasLog={hasLog} setSelDate={setSelDate} setTab={setTab} />}
           </>
@@ -622,6 +624,7 @@ function App() {
             setModal={setModal}
           />
         )}
+        {category === "oral" && <OralCarePage />}
         {category === "tiktok" && (
           <TikTokPage trials={trials} updateTrial={updateTrial} removeTrial={removeTrial} setModal={setModal} />
         )}
@@ -810,6 +813,7 @@ function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProd
       </div>
 
       {/* Stock */}
+      <WashTools />
       <StockCard scope="body" items={stockItems || []} inUse={bodyProducts} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />
     </div>
   );
@@ -1471,6 +1475,641 @@ function ReflectionModal({ trial, updateTrial, close }) {
   );
 }
 
+// ─── Additions: Rituals (mask calendar, gua sha & roller), Oral Care, Wash Tools ───
+const useLS = (k, init) => { const [v, setV] = useState(() => ls.get(k, init)); useEffect(() => { ls.set(k, v); }, [v]); return [v, setV]; };
+const uid = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
+const parseList = (s) => (s || "").split(",").map(x => x.trim()).filter(Boolean);
+const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+const FEATURES = ["Hydration", "Clarifying", "Brightening", "Soothing", "Other"];
+const FEAT_COLORS = { Hydration: "#5b9bd5", Clarifying: "#7a9e7e", Brightening: "#c4a86a", Soothing: "#c98aa5", Other: "#9a9a8a" };
+const shrinkImage = (file, cb) => {
+  const r = new FileReader();
+  r.onload = (e) => { const img = new Image(); img.onload = () => { const s = Math.min(1, 800 / Math.max(img.width, img.height)); const c = document.createElement("canvas"); c.width = img.width * s; c.height = img.height * s; c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); cb(c.toDataURL("image/jpeg", 0.75)); }; img.src = e.target.result; };
+  r.readAsDataURL(file);
+};
+const Fld = ({ label, note, children }) => (
+  <div style={S.formGroup}><label style={{ ...S.formLabel, ...(note ? { color: NOTE_COLOR } : {}) }}>{label}</label>{children}</div>
+);
+const NoteBox = ({ text }) => text ? <div style={S.noteReminder}>📌 {text}</div> : null;
+const Sel = ({ value, onChange, options }) => (
+  <select style={S.formSelect} value={value} onChange={e => onChange(e.target.value)}>{options.map(o => <option key={o}>{o}</option>)}</select>
+);
+const Chips = ({ options, value, onChange }) => (
+  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{options.map(o => <button key={o} style={{ ...S.filterChip, ...(value === o ? S.filterChipActive : {}) }} onClick={() => onChange(o)}>{o}</button>)}</div>
+);
+
+// ── Rituals tab (under Facial)
+function RitualsPage() {
+  const [view, setView] = useState("masks");
+  return (
+    <div style={S.page}>
+      <div style={S.pageTitle}>Rituals</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {[["masks", "🧖 Mask calendar"], ["guasha", "✨ Gua sha & roller"]].map(([id, l]) => (
+          <button key={id} style={{ ...S.filterChip, flex: 1, padding: "8px 0", ...(view === id ? S.filterChipActive : {}) }} onClick={() => setView(id)}>{l}</button>
+        ))}
+      </div>
+      {view === "masks" ? <MaskCalendar /> : <GuaSha />}
+    </div>
+  );
+}
+
+function MaskCalendar() {
+  const [entries, setEntries] = useLS("glow_masks", []);
+  const [cal, setCal] = useState({ y: new Date().getFullYear(), m: new Date().getMonth() });
+  const [sel, setSel] = useState(todayStr());
+  const [filter, setFilter] = useState("All");
+  const [form, setForm] = useState(null);
+  const stock = ls.get("glow_stock", {}).facial || [];
+  const meta = ls.get("glow_product_meta", {});
+  const today = todayStr();
+  const masks = [...new Set(entries.map(e => e.mask))];
+  const shown = entries.filter(e => filter === "All" || e.feature === filter || e.mask === filter);
+  const byDate = {}; shown.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+  const cells = [...Array(getFirstDay(cal.y, cal.m)).fill(null), ...Array.from({ length: getDaysInMonth(cal.y, cal.m) }, (_, i) => i + 1)];
+  const move = (n) => setCal(p => { let m = p.m + n, y = p.y; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } return { y, m }; });
+  const dayList = shown.filter(e => e.date === sel);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const pickMask = (name) => { const mt = meta[name] || {}; setForm(f => ({ ...f, mask: name, brand: f.brand || mt.brand || "", notes: f.notes || mt.notes || "" })); };
+  const save = () => {
+    if (!form.mask.trim() || !form.feature) return;
+    const e = { ...form, mask: form.mask.trim() };
+    setEntries(p => e.id ? p.map(x => x.id === e.id ? e : x) : [...p, { ...e, id: uid() }]);
+    setForm(null);
+  };
+  const del = (id) => { if (window.confirm("Delete this mask entry?")) setEntries(p => p.filter(e => e.id !== id)); };
+  const counts = masks.map(m => [m, entries.filter(e => e.mask === m).length]).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <>
+      <div style={S.card}>
+        <div style={S.calNav}>
+          <button style={S.calNavBtn} onClick={() => move(-1)}>‹</button>
+          <span style={S.calTitle}>{MONTHS[cal.m]} {cal.y}</span>
+          <button style={S.calNavBtn} onClick={() => move(1)}>›</button>
+        </div>
+        <div style={S.calGrid}>
+          {DAYS_SHORT.map(d => <div key={d} style={S.calDayLabel}>{d}</div>)}
+          {cells.map((d, i) => {
+            if (!d) return <div key={"e" + i} />;
+            const ds = `${cal.y}-${String(cal.m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+            const list = byDate[ds] || [];
+            return (
+              <div key={d} style={{ ...S.calDay, ...(ds === today ? S.calToday : {}), ...(ds === sel ? S.calSelected : {}) }} onClick={() => setSel(ds)}>
+                <span style={S.calDayNum}>{d}</span>
+                {list.length > 0 && <div style={{ position: "absolute", bottom: 3, display: "flex", gap: 2 }}>{list.slice(0, 3).map(e => <span key={e.id} style={{ width: 5, height: 5, borderRadius: "50%", background: FEAT_COLORS[e.feature] || "#9a9a8a" }} />)}</div>}
+              </div>
+            );
+          })}
+        </div>
+        <div style={S.legend}>{FEATURES.map(f => <span key={f} style={S.legendItem}><span style={{ ...S.legendDot, background: FEAT_COLORS[f] }} />{f}</span>)}</div>
+        <div style={{ marginTop: 12 }}>
+          <label style={S.formLabel}>Filter by mask or feature</label>
+          <Sel value={filter} onChange={setFilter} options={["All", ...FEATURES, ...masks.filter(m => !FEATURES.includes(m))]} />
+        </div>
+        {counts.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>{counts.map(([m, n]) => <span key={m} style={S.ingrTag}>{m} · {n}×</span>)}</div>}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ ...S.cardTitle, marginBottom: 0 }}>{fmtDate(sel).month.slice(0, 3)} {fmtDate(sel).date}</div>
+          <button style={S.smallBtn} onClick={() => setForm({ date: sel, mask: "", brand: "", feature: null, minutes: "", notes: "", observation: "" })}>+ Add mask entry</button>
+        </div>
+        {dayList.length === 0 && <div style={S.emptySmall}>No masks logged this day</div>}
+        {dayList.map(e => (
+          <div key={e.id} style={S.stockRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={S.stockName}>{e.mask}</span>
+                <span style={{ ...S.statusBadge, background: (FEAT_COLORS[e.feature] || "#9a9a8a") + "22", color: FEAT_COLORS[e.feature] || "#9a9a8a" }}>{e.feature}</span>
+              </div>
+              {e.brand && <div style={S.brandPreview}>{e.brand}{e.minutes ? ` · ${e.minutes} min` : ""}</div>}
+              <NoteBox text={e.notes} />
+              {e.observation && <div style={S.obsText}>{e.observation}</div>}
+            </div>
+            <button style={S.iconBtn} onClick={() => setForm(e)}>✎</button>
+            <button style={S.removeBtn} onClick={() => del(e.id)}>×</button>
+          </div>
+        ))}
+      </div>
+
+      {form && (
+        <Overlay close={() => setForm(null)}>
+          <div style={S.modalTitle}>🧖 {form.id ? "Edit" : "Add"} mask entry</div>
+          <Fld label="Date"><input type="date" style={S.formInput} value={form.date} onChange={e => set("date", e.target.value)} /></Fld>
+          <Fld label="Mask (from your facial stock, or type one)">
+            <input style={S.formInput} list="mask-stock" value={form.mask} onChange={e => pickMask(e.target.value)} placeholder="Mask name" />
+            <datalist id="mask-stock">{stock.map(n => <option key={n} value={n} />)}</datalist>
+          </Fld>
+          <Fld label="Brand"><input style={S.formInput} value={form.brand} onChange={e => set("brand", e.target.value)} /></Fld>
+          <Fld label="Feature / purpose"><TagPicker tags={FEATURES} value={form.feature} onChange={v => set("feature", v)} color="#7a9e7e" /></Fld>
+          <Fld label="Minutes left on (optional)"><input type="number" style={S.formInput} value={form.minutes} onChange={e => set("minutes", e.target.value)} /></Fld>
+          <Fld label="📌 Important notes" note><textarea style={{ ...S.textarea, height: 56, borderColor: NOTE_COLOR + "66" }} value={form.notes} onChange={e => set("notes", e.target.value)} /></Fld>
+          <Fld label="Observation"><textarea style={{ ...S.textarea, height: 56 }} placeholder="Skin reaction or result" value={form.observation} onChange={e => set("observation", e.target.value)} /></Fld>
+          <div style={S.modalBtns}><button style={S.cancelBtn} onClick={() => setForm(null)}>Cancel</button><button style={{ ...S.primaryBtn, flex: 1, opacity: form.mask.trim() && form.feature ? 1 : 0.5 }} onClick={save}>Save</button></div>
+        </Overlay>
+      )}
+    </>
+  );
+}
+
+const GS_EMPTY = { routines: [], activeId: null, log: [], photos: [] };
+const GS_AREAS = ["Full face", "Jawline", "Cheeks", "Forehead", "Neck", "Eyes"];
+function GuaSha() {
+  const [g, setG] = useLS("glow_guasha", GS_EMPTY);
+  const [edit, setEdit] = useState(null);
+  const [pNote, setPNote] = useState("");
+  const [pos, setPos] = useState(50);
+  const fileRef = useRef();
+  const today = todayStr();
+  const active = g.routines.find(r => r.id === g.activeId);
+  const doneDates = active ? g.log.filter(l => l.routineId === active.id).map(l => l.date) : [];
+  const doneToday = doneDates.includes(today);
+  const week = doneDates.filter(d => d > addDaysStr(today, -7) && d <= today).length;
+  let streak = 0; { let d = doneToday ? today : addDaysStr(today, -1); while (doneDates.includes(d)) { streak++; d = addDaysStr(d, -1); } }
+  const photos = active ? g.photos.filter(p => p.routineId === active.id).sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id) : [];
+  const first = photos[0], latest = photos[photos.length - 1];
+  const start = first ? first.date : (active ? active.createdAt : today);
+
+  const toggleDone = () => setG(p => {
+    const has = p.log.some(l => l.routineId === active.id && l.date === today);
+    return { ...p, log: has ? p.log.filter(l => !(l.routineId === active.id && l.date === today)) : [...p.log, { id: uid(), routineId: active.id, date: today }] };
+  });
+  const addPhoto = (file) => { if (!file || !active) return; shrinkImage(file, img => { setG(p => ({ ...p, photos: [...p.photos, { id: uid(), routineId: active.id, date: today, img, note: pNote.trim() }] })); setPNote(""); }); };
+  const delPhoto = (id) => { if (window.confirm("Delete this progress photo?")) setG(p => ({ ...p, photos: p.photos.filter(x => x.id !== id) })); };
+  const setActive = (id) => setG(p => ({ ...p, activeId: id }));
+  const patchRoutine = (id, patch) => setG(p => ({ ...p, routines: p.routines.map(r => r.id === id ? { ...r, ...patch } : r), activeId: patch.archived && p.activeId === id ? null : p.activeId }));
+  const delRoutine = (id) => { if (window.confirm("Delete this routine and its history?")) setG(p => ({ ...p, routines: p.routines.filter(r => r.id !== id), log: p.log.filter(l => l.routineId !== id), photos: p.photos.filter(x => x.routineId !== id), activeId: p.activeId === id ? null : p.activeId })); };
+  const saveRoutine = () => {
+    if (!edit.name.trim()) return;
+    setG(p => {
+      if (edit.id) return { ...p, routines: p.routines.map(r => r.id === edit.id ? edit : r) };
+      const r = { ...edit, id: uid(), createdAt: today };
+      return { ...p, routines: [...p.routines, r], activeId: p.activeId || r.id };
+    });
+    setEdit(null);
+  };
+  const addRoutineImgs = (files) => Array.from(files).forEach(f => shrinkImage(f, img => setEdit(e => ({ ...e, imgs: [...(e.imgs || []), img] }))));
+  const setE = (k, v) => setEdit(e => ({ ...e, [k]: v }));
+  const live = g.routines.filter(r => !r.archived), archived = g.routines.filter(r => r.archived);
+  const newRoutine = () => setEdit({ name: "", tool: "Gua sha", brand: "", product: "", imgs: [], steps: "", area: "Full face", minutes: "", perWeek: "", notes: "" });
+  const imgStyle = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+
+  return (
+    <>
+      <div style={S.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ ...S.cardTitle, marginBottom: 0 }}>Active routine</div>
+          <button style={S.smallBtn} onClick={newRoutine}>+ New routine</button>
+        </div>
+        {!active ? <div style={S.emptySmall}>Add a routine with a photo to follow, then set it as active</div> : (
+          <>
+            {(active.imgs || []).length > 0 && (
+              <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 8 }}>
+                {active.imgs.map((im, i) => <img key={i} src={im} alt="" style={{ height: 200, borderRadius: 12, flexShrink: 0, maxWidth: "100%", objectFit: "cover" }} />)}
+              </div>
+            )}
+            <div style={S.treatName}>{active.name}</div>
+            <div style={S.treatMeta}>{active.tool}{active.area ? ` · ${active.area}` : ""}{active.minutes ? ` · ${active.minutes} min` : ""}{active.perWeek ? ` · ${active.perWeek}×/week` : ""}</div>
+            {(active.brand || active.product) && <div style={S.brandPreview}>{[active.brand, active.product].filter(Boolean).join(" · ")}</div>}
+            {active.steps && <div style={{ ...S.obsText, marginTop: 6 }}>{active.steps}</div>}
+            <NoteBox text={active.notes} />
+            <button style={{ ...(doneToday ? S.dashedBtn : S.primaryBtn), width: "100%", marginTop: 10 }} onClick={toggleDone}>{doneToday ? "✓ Done today — tap to undo" : "Mark as done"}</button>
+            <div style={{ ...S.statsRow, marginTop: 10, marginBottom: 0 }}>
+              <div style={S.statBox}><div style={S.statNum}>🔥 {streak}</div><div style={S.statLabel}>Day streak</div></div>
+              <div style={S.statBox}><div style={S.statNum}>{week}{active.perWeek ? `/${active.perWeek}` : ""}</div><div style={S.statLabel}>Last 7 days</div></div>
+              <div style={S.statBox}><div style={S.statNum}>{doneDates.length}</div><div style={S.statLabel}>Sessions</div></div>
+            </div>
+            {doneDates.length > 0 && <div style={{ ...S.trackerHistLabel, textAlign: "left", marginTop: 8 }}>Completion log: {[...doneDates].sort().reverse().slice(0, 8).map(shortDate).join(", ")}{doneDates.length > 8 ? "…" : ""}</div>}
+          </>
+        )}
+      </div>
+
+      {active && (
+        <div style={S.card}>
+          <div style={S.cardTitle}>📷 Progress photos</div>
+          <Fld label="Note / observation (puffiness, definition, glow)"><input style={S.formInput} value={pNote} onChange={e => setPNote(e.target.value)} /></Fld>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => { addPhoto(e.target.files[0]); e.target.value = ""; }} />
+          <button style={S.primaryBtn} onClick={() => fileRef.current.click()}>+ Add today's photo</button>
+          {photos.length >= 2 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ position: "relative", aspectRatio: "1", borderRadius: 12, overflow: "hidden" }}>
+                <img src={latest.img} alt="" style={imgStyle} />
+                <img src={first.img} alt="" style={{ ...imgStyle, clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
+                <div style={{ position: "absolute", top: 0, bottom: 0, left: `${pos}%`, width: 2, background: "#fff" }} />
+              </div>
+              <input type="range" min="0" max="100" value={pos} onChange={e => setPos(Number(e.target.value))} style={{ width: "100%", marginTop: 8 }} />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#7a6e5a" }}><span>First · {shortDate(first.date)}</span><span>Latest · {shortDate(latest.date)}</span></div>
+            </div>
+          )}
+          <div style={{ ...S.trackerSection, marginTop: 12 }}>
+            <div style={S.trackerRow}><span>Started</span><span>{shortDate(start)}</span></div>
+            <div style={S.trackerRow}><span>Days elapsed</span><span>{Math.max(0, daysBetween(start, today))}</span></div>
+            <div style={S.trackerRow}><span>Photos</span><span>{photos.length}</span></div>
+            <div style={{ ...S.trackerRow, borderBottom: "none" }}><span>Sessions completed</span><span>{doneDates.length}</span></div>
+          </div>
+          {photos.length > 0 && (
+            <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+              {[...photos].reverse().map(p => (
+                <div key={p.id} style={{ flexShrink: 0, width: 92 }}>
+                  <img src={p.img} alt="" style={{ width: 92, height: 92, borderRadius: 10, objectFit: "cover" }} onClick={() => delPhoto(p.id)} />
+                  <div style={{ fontSize: 10, color: "#7a6e5a" }}>{shortDate(p.date)}</div>
+                  {p.note && <div style={{ fontSize: 10, color: "#9a8e7a" }}>{p.note}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {photos.length > 0 && <div style={{ fontSize: 10, color: "#a09080", marginTop: 4 }}>Tap a photo to delete it.</div>}
+        </div>
+      )}
+
+      <div style={S.card}>
+        <div style={S.cardTitle}>Routine library</div>
+        {live.length === 0 && <div style={S.emptySmall}>No routines yet</div>}
+        {live.map(r => (
+          <div key={r.id} style={S.stockRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={S.stockName}>{r.name} {r.id === g.activeId && <span style={S.inUseChip}>active</span>}</div>
+              <div style={S.treatMeta}>{r.tool}{r.area ? ` · ${r.area}` : ""}</div>
+            </div>
+            {r.id !== g.activeId && <button style={S.smallBtn} onClick={() => setActive(r.id)}>Set active</button>}
+            <button style={S.iconBtn} onClick={() => setEdit(r)}>✎</button>
+            <button style={S.iconBtn} title="Archive" onClick={() => patchRoutine(r.id, { archived: true })}>🗄</button>
+          </div>
+        ))}
+        {archived.length > 0 && <div style={{ ...S.monthLabel, marginTop: 12 }}>Archived</div>}
+        {archived.map(r => (
+          <div key={r.id} style={{ ...S.stockRow, opacity: 0.7 }}>
+            <div style={{ flex: 1 }}><div style={S.stockName}>{r.name}</div></div>
+            <button style={S.smallBtn} onClick={() => patchRoutine(r.id, { archived: false })}>Restore</button>
+            <button style={S.removeBtn} onClick={() => delRoutine(r.id)}>×</button>
+          </div>
+        ))}
+      </div>
+
+      {edit && (
+        <Overlay close={() => setEdit(null)}>
+          <div style={S.modalTitle}>✨ {edit.id ? "Edit" : "New"} routine</div>
+          <Fld label="Routine name"><input style={S.formInput} value={edit.name} onChange={e => setE("name", e.target.value)} /></Fld>
+          <Fld label="Tool"><Chips options={["Gua sha", "Roller", "Both"]} value={edit.tool} onChange={v => setE("tool", v)} /></Fld>
+          <Fld label="Brand"><input style={S.formInput} value={edit.brand} onChange={e => setE("brand", e.target.value)} /></Fld>
+          <Fld label="Product name"><input style={S.formInput} value={edit.product} onChange={e => setE("product", e.target.value)} /></Fld>
+          <Fld label="Routine photo(s)">
+            <input type="file" accept="image/*" multiple onChange={e => { addRoutineImgs(e.target.files); e.target.value = ""; }} />
+            {(edit.imgs || []).length > 0 && <div style={{ display: "flex", gap: 6, marginTop: 8, overflowX: "auto" }}>{edit.imgs.map((im, i) => <div key={i} style={{ position: "relative", flexShrink: 0 }}><img src={im} alt="" style={{ height: 70, borderRadius: 8 }} /><button style={{ position: "absolute", top: 2, right: 2, background: "rgba(0,0,0,.55)", color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20 }} onClick={() => setE("imgs", edit.imgs.filter((_, j) => j !== i))}>×</button></div>)}</div>}
+          </Fld>
+          <Fld label="Steps (optional)"><textarea style={{ ...S.textarea, height: 60 }} value={edit.steps} onChange={e => setE("steps", e.target.value)} /></Fld>
+          <Fld label="Target area"><Sel value={edit.area} onChange={v => setE("area", v)} options={GS_AREAS} /></Fld>
+          <div style={S.formRow}>
+            <div style={{ flex: 1 }}><label style={S.formLabel}>Minutes</label><input type="number" style={S.formInput} value={edit.minutes} onChange={e => setE("minutes", e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label style={S.formLabel}>Times / week</label><input type="number" style={S.formInput} value={edit.perWeek} onChange={e => setE("perWeek", e.target.value)} /></div>
+          </div>
+          <Fld label="📌 Important notes" note><textarea style={{ ...S.textarea, height: 56, borderColor: NOTE_COLOR + "66" }} value={edit.notes} onChange={e => setE("notes", e.target.value)} /></Fld>
+          <div style={S.modalBtns}><button style={S.cancelBtn} onClick={() => setEdit(null)}>Cancel</button><button style={{ ...S.primaryBtn, flex: 1, opacity: edit.name.trim() ? 1 : 0.5 }} onClick={saveRoutine}>Save routine</button></div>
+        </Overlay>
+      )}
+    </>
+  );
+}
+
+// ── Oral care
+const ORAL_TYPES = ["Toothpaste", "Mouthwash", "Floss", "Whitening", "Sensitivity treatment", "Other"];
+const ORAL_STATUS = ["In use", "Finished", "Stopped"];
+const TRIGGERS = ["Cold", "Hot", "Sweet", "Acidic", "Brushing", "Air", "Other"];
+const TOOTH_AREAS = ["Upper left", "Upper front", "Upper right", "Lower left", "Lower front", "Lower right"];
+
+function OralChecks({ date }) {
+  const prods = ls.get("glow_oral_products", []).filter(p => p.status === "In use");
+  const [checks, setChecks] = useLS("glow_oral_checks", {});
+  if (!prods.length) return null;
+  const day = checks[date] || {};
+  const tog = (k) => setChecks(p => ({ ...p, [date]: { ...(p[date] || {}), [k]: !(p[date] || {})[k] } }));
+  return (
+    <div style={S.card}>
+      <div style={S.cardTitle}>🦷 Oral care</div>
+      {prods.map(p => (
+        <div key={p.id} style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}><span style={S.stepName}>{p.name}</span>{p.brand && <span style={S.brandInline}> · {p.brand}</span>}</div>
+            {["AM", "PM"].map(t => <button key={t} style={{ ...S.filterChip, ...(day[p.id + t] ? { background: "#7a9e7e", borderColor: "#7a9e7e", color: "#fff" } : {}) }} onClick={() => tog(p.id + t)}>{day[p.id + t] ? "✓ " : ""}{t}</button>)}
+          </div>
+          <NoteBox text={p.notes} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OralCarePage() {
+  const [prods, setProds] = useLS("glow_oral_products", []);
+  const [sens, setSens] = useLS("glow_oral_sens", []);
+  const [form, setForm] = useState(null);
+  const [sForm, setSForm] = useState(null);
+  const [cmp, setCmp] = useState([]);
+  const [range, setRange] = useState("90 days");
+  const [trig, setTrig] = useState("All");
+  const today = todayStr();
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setS2 = (k, v) => setSForm(f => ({ ...f, [k]: v }));
+  const newProd = () => setForm({ name: "", brand: "", type: "Toothpaste", ingredients: "", actives: "", watch: "", notes: "", dateStarted: today, status: "In use" });
+  const saveProd = () => {
+    if (!form.name.trim() || !form.ingredients.trim()) return;
+    const p = { ...form, name: form.name.trim() };
+    p.dateStopped = p.status === "In use" ? "" : (p.dateStopped || today);
+    setProds(prev => p.id ? prev.map(x => x.id === p.id ? p : x) : [...prev, { ...p, id: uid() }]);
+    setForm(null);
+  };
+  const delProd = (id) => { if (window.confirm("Delete this product?")) { setProds(p => p.filter(x => x.id !== id)); setCmp(c => c.filter(x => x !== id)); } };
+  const saveSens = () => {
+    const e = { ...sForm, productIds: prods.filter(p => p.status === "In use").map(p => p.id) };
+    setSens(p => e.id ? p.map(x => x.id === e.id ? e : x) : [...p, { ...e, id: uid() }]);
+    setSForm(null);
+  };
+
+  const days = range === "30 days" ? 30 : range === "90 days" ? 90 : null;
+  const list = sens.filter(e => (!days || e.date >= addDaysStr(today, -days)) && (trig === "All" || (e.triggers || []).includes(trig))).sort((a, b) => a.date.localeCompare(b.date));
+  const W = 300, H = 120, PX = 24, PY = 12;
+  const d0 = list.length ? list[0].date : today, d1 = list.length ? list[list.length - 1].date : today;
+  const span = Math.max(1, daysBetween(d0, d1));
+  const xOf = (d) => PX + ((daysBetween(d0, d) / span) * (W - PX - 8));
+  const yOf = (v) => H - PY - (v / 10) * (H - 2 * PY);
+  const marks = prods.flatMap(p => [p.dateStarted && { d: p.dateStarted, n: p.name, k: "started" }, p.dateStopped && { d: p.dateStopped, n: p.name, k: "stopped" }]).filter(m => m && m.d >= d0 && m.d <= d1);
+  const beforeAfter = prods.map(p => {
+    if (!p.dateStarted) return null;
+    const b = sens.filter(e => e.date < p.dateStarted).map(e => e.level);
+    const a = sens.filter(e => e.date >= p.dateStarted && (!p.dateStopped || e.date <= p.dateStopped)).map(e => e.level);
+    return b.length && a.length ? { name: p.name, before: avg(b), after: avg(a) } : null;
+  }).filter(Boolean);
+
+  const watchSet = new Set(prods.flatMap(p => parseList(p.watch).map(w => w.toLowerCase())));
+  const selected = prods.filter(p => cmp.includes(p.id));
+  const ingr = (p) => [...new Set(parseList(p.ingredients).map(x => x.toLowerCase()))];
+  const shared = selected.length > 1 ? ingr(selected[0]).filter(i => selected.every(p => ingr(p).includes(i))) : [];
+  const flagged = (p) => ingr(p).filter(i => [...watchSet].some(w => i === w || i.includes(w)));
+
+  return (
+    <div style={S.page}>
+      <div style={S.pageTitle}>Oral Care</div>
+      <OralChecks date={today} key={JSON.stringify(prods.map(p => [p.id, p.status, p.notes, p.name]))} />
+
+      <div style={S.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ ...S.cardTitle, marginBottom: 0 }}>🧴 Products</div>
+          <button style={S.smallBtn} onClick={newProd}>+ Add</button>
+        </div>
+        <div style={{ fontSize: 11, color: "#9a8e7a" }}>Products marked "In use" appear in your daily checklist.</div>
+        {prods.length === 0 && <div style={S.emptySmall}>No oral care products yet</div>}
+        {prods.map(p => (
+          <div key={p.id} style={S.stockRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><span style={S.stockName}>{p.name}</span><span style={S.inUseChip}>{p.status}</span></div>
+              <div style={S.brandPreview}>{[p.brand, p.type].filter(Boolean).join(" · ")}</div>
+              {parseList(p.actives).length > 0 && <div style={S.ingrPreview}>Actives: {parseList(p.actives).join(" · ")}</div>}
+              <NoteBox text={p.notes} />
+            </div>
+            <button style={S.iconBtn} onClick={() => setForm(p)}>✎</button>
+            <button style={S.removeBtn} onClick={() => delProd(p.id)}>×</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ ...S.cardTitle, marginBottom: 0 }}>📈 Sensitivity tracker</div>
+          <button style={S.smallBtn} onClick={() => setSForm({ date: today, level: 3, triggers: [], area: TOOTH_AREAS[0], notes: "" })}>+ Log</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <div style={{ flex: 1 }}><Sel value={range} onChange={setRange} options={["30 days", "90 days", "All time"]} /></div>
+          <div style={{ flex: 1 }}><Sel value={trig} onChange={setTrig} options={["All", ...TRIGGERS]} /></div>
+        </div>
+        {list.length === 0 ? <div style={S.emptySmall}>No sensitivity entries for this filter</div> : (
+          <>
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%" }}>
+              {[0, 5, 10].map(v => <g key={v}><line x1={PX} x2={W - 8} y1={yOf(v)} y2={yOf(v)} stroke="#e8e0d6" /><text x={2} y={yOf(v) + 3} fontSize="8" fill="#9a8e7a">{v}</text></g>)}
+              {marks.map((m, i) => <line key={i} x1={xOf(m.d)} x2={xOf(m.d)} y1={PY} y2={H - PY} stroke={m.k === "started" ? "#7a9e7e" : "#d4846a"} strokeDasharray="3 3" />)}
+              <polyline fill="none" stroke="#4a5c4a" strokeWidth="2" points={list.map(e => `${xOf(e.date)},${yOf(e.level)}`).join(" ")} />
+              {list.map(e => <circle key={e.id} cx={xOf(e.date)} cy={yOf(e.level)} r="3" fill="#4a5c4a" />)}
+            </svg>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#9a8e7a" }}><span>{shortDate(d0)}</span><span>{shortDate(d1)}</span></div>
+            {marks.length > 0 && <div style={{ fontSize: 11, color: "#7a6e5a", marginTop: 6 }}>{marks.map((m, i) => <div key={i}><span style={{ color: m.k === "started" ? "#7a9e7e" : "#d4846a" }}>┆</span> {m.n} {m.k} · {shortDate(m.d)}</div>)}</div>}
+          </>
+        )}
+        {beforeAfter.length > 0 && (
+          <div style={{ ...S.trackerSection, marginTop: 10 }}>
+            <div style={S.trackerDesc}>Average sensitivity before and after each product</div>
+            {beforeAfter.map(b => <div key={b.name} style={S.trackerRow}><span>{b.name}</span><span>{b.before.toFixed(1)} → <b style={{ color: b.after < b.before ? "#5f8a63" : "#c4604a" }}>{b.after.toFixed(1)}</b></span></div>)}
+          </div>
+        )}
+        {[...list].reverse().slice(0, 6).map(e => (
+          <div key={e.id} style={S.obsRow}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={S.obsDate}>{shortDate(e.date)}</span><span style={S.obsTag}>{e.level}/10</span><span style={{ fontSize: 10, color: "#9a8e7a" }}>{e.area}</span></div>
+              {(e.triggers || []).length > 0 && <div style={S.ingrPreview}>{e.triggers.join(" · ")}</div>}
+              {e.notes && <div style={S.obsText}>{e.notes}</div>}
+            </div>
+            <button style={S.iconBtn} onClick={() => setSForm(e)}>✎</button>
+            <button style={S.removeBtn} onClick={() => setSens(p => p.filter(x => x.id !== e.id))}>×</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardTitle}>🔍 Compare ingredients</div>
+        {prods.length < 2 ? <div style={S.emptySmall}>Add at least two products to compare</div> : (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              {prods.map(p => <button key={p.id} style={{ ...S.filterChip, ...(cmp.includes(p.id) ? S.filterChipActive : {}) }} onClick={() => setCmp(c => c.includes(p.id) ? c.filter(x => x !== p.id) : [...c, p.id])}>{p.name}</button>)}
+            </div>
+            {selected.length >= 2 && (
+              <>
+                <div style={S.trackerSection}>
+                  <div style={S.trackerDesc}><b>Shared by all</b></div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{shared.length ? shared.map(i => <span key={i} style={S.ingrTag}>{i}</span>) : <span style={S.emptySmall}>Nothing shared</span>}</div>
+                </div>
+                {selected.map(p => {
+                  const only = ingr(p).filter(i => !selected.some(o => o.id !== p.id && ingr(o).includes(i)));
+                  const fl = flagged(p);
+                  return (
+                    <div key={p.id} style={{ marginBottom: 10 }}>
+                      <div style={S.stockName}>{p.name}</div>
+                      {fl.length > 0 && <div style={S.incompPreview}>⚠ Contains ingredient to watch: {fl.join(", ")}</div>}
+                      <div style={{ fontSize: 10, color: "#7a6e5a", margin: "4px 0" }}>Only in this product</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{only.length ? only.map(i => <span key={i} style={watchSet.has(i) ? S.incompTag : S.ingrTag}>{i}</span>) : <span style={S.emptySmall}>None</span>}</div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {form && (
+        <Overlay close={() => setForm(null)}>
+          <div style={S.modalTitle}>🦷 {form.id ? "Edit" : "Add"} product</div>
+          <Fld label="Product name"><input style={S.formInput} value={form.name} onChange={e => set("name", e.target.value)} /></Fld>
+          <Fld label="Brand"><input style={S.formInput} value={form.brand} onChange={e => set("brand", e.target.value)} /></Fld>
+          <Fld label="Type"><Sel value={form.type} onChange={v => set("type", v)} options={ORAL_TYPES} /></Fld>
+          <Fld label="Full ingredients list (required)"><textarea style={{ ...S.textarea, height: 80 }} placeholder="Aqua, Glycerin, Potassium nitrate..." value={form.ingredients} onChange={e => set("ingredients", e.target.value)} /></Fld>
+          <Fld label="Key actives (comma separated)"><input style={S.formInput} placeholder="fluoride, potassium nitrate" value={form.actives} onChange={e => set("actives", e.target.value)} /></Fld>
+          <Fld label="Ingredients to watch (comma separated)"><input style={S.formInput} value={form.watch} onChange={e => set("watch", e.target.value)} /></Fld>
+          <Fld label="📌 Important notes" note><textarea style={{ ...S.textarea, height: 56, borderColor: NOTE_COLOR + "66" }} value={form.notes} onChange={e => set("notes", e.target.value)} /></Fld>
+          <Fld label="Date started"><input type="date" style={S.formInput} value={form.dateStarted} onChange={e => set("dateStarted", e.target.value)} /></Fld>
+          <Fld label="Status"><Chips options={ORAL_STATUS} value={form.status} onChange={v => set("status", v)} /></Fld>
+          <div style={S.modalBtns}><button style={S.cancelBtn} onClick={() => setForm(null)}>Cancel</button><button style={{ ...S.primaryBtn, flex: 1, opacity: form.name.trim() && form.ingredients.trim() ? 1 : 0.5 }} onClick={saveProd}>Save</button></div>
+        </Overlay>
+      )}
+      {sForm && (
+        <Overlay close={() => setSForm(null)}>
+          <div style={S.modalTitle}>📈 Log sensitivity</div>
+          <Fld label="Date"><input type="date" style={S.formInput} value={sForm.date} max={today} onChange={e => setS2("date", e.target.value)} /></Fld>
+          <Fld label={`Level: ${sForm.level}/10 (0 none, 10 severe)`}><input type="range" min="0" max="10" value={sForm.level} onChange={e => setS2("level", Number(e.target.value))} style={{ width: "100%" }} /></Fld>
+          <Fld label="Triggers"><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{TRIGGERS.map(t => <button key={t} style={{ ...S.filterChip, ...((sForm.triggers || []).includes(t) ? S.filterChipActive : {}) }} onClick={() => setS2("triggers", (sForm.triggers || []).includes(t) ? sForm.triggers.filter(x => x !== t) : [...(sForm.triggers || []), t])}>{t}</button>)}</div></Fld>
+          <Fld label="Area"><Sel value={sForm.area} onChange={v => setS2("area", v)} options={TOOTH_AREAS} /></Fld>
+          <Fld label="Notes"><textarea style={{ ...S.textarea, height: 56 }} value={sForm.notes} onChange={e => setS2("notes", e.target.value)} /></Fld>
+          <div style={{ fontSize: 11, color: "#9a8e7a" }}>Products currently in use are linked automatically.</div>
+          <div style={S.modalBtns}><button style={S.cancelBtn} onClick={() => setSForm(null)}>Cancel</button><button style={{ ...S.primaryBtn, flex: 1 }} onClick={saveSens}>Save</button></div>
+        </Overlay>
+      )}
+    </div>
+  );
+}
+
+// ── Wash tools (under Body)
+const WASH_TYPES = ["Loofah", "Washcloth", "Sponge", "Brush", "Mitt", "Other"];
+const WASH_WEEKS = { Loofah: 4, Washcloth: 2, Sponge: 4, Brush: 12, Mitt: 8, Other: 8 };
+const DIFF = ["Yes", "Somewhat", "No", "Too early to tell"];
+const washDue = (t) => { const s = t.dateFirstUsed || t.datePurchased; return s && t.weeks ? addDaysStr(s, t.weeks * 7) : null; };
+const washStatus = (t, today) => t.retiredOn ? "Retired" : (washDue(t) && washDue(t) < today ? "Due for replacement" : "In use");
+const money = (n) => `R${(Math.round(n * 100) / 100).toFixed(2)}`;
+
+function WashTools() {
+  const [tools, setTools] = useLS("glow_wash_tools", []);
+  const [form, setForm] = useState(null);
+  const [open, setOpen] = useState(null);
+  const [rev, setRev] = useState({ date: todayStr(), rating: 4, verdict: "Yes", notes: "" });
+  const today = todayStr();
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const blank = (over) => ({ name: "", type: "Loofah", where: "", price: "", datePurchased: today, dateFirstUsed: today, weeks: WASH_WEEKS.Loofah, difference: "Too early to tell", observations: "", notes: "", reviews: [], ...over });
+  const ok = form && form.name.trim() && form.where.trim() && form.price !== "" && Number(form.price) >= 0;
+  const save = () => { if (!ok) return; const t = { ...form, name: form.name.trim(), price: Number(form.price), weeks: Number(form.weeks) || 0 }; setTools(p => t.id ? p.map(x => x.id === t.id ? t : x) : [...p, { ...t, id: uid() }]); setForm(null); };
+  const replace = (t) => { if (!window.confirm(`Mark ${t.name} as replaced and add the new one?`)) return; setTools(p => p.map(x => x.id === t.id ? { ...x, retiredOn: today } : x)); setForm(blank({ name: t.name, type: t.type, where: t.where, price: t.price, weeks: t.weeks })); };
+  const addReview = (t) => { setTools(p => p.map(x => x.id === t.id ? { ...x, difference: rev.verdict, reviews: [...(x.reviews || []), { ...rev, id: uid() }] } : x)); setRev({ date: today, rating: 4, verdict: "Yes", notes: "" }); };
+  const cpw = (t) => { const s = t.dateFirstUsed || t.datePurchased; if (!s || !t.price) return null; const weeks = Math.max(1, daysBetween(s, t.retiredOn || today)) / 7; return t.price / Math.max(1, weeks); };
+  const live = tools.filter(t => !t.retiredOn), old = tools.filter(t => t.retiredOn);
+
+  return (
+    <div style={S.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div style={{ ...S.cardTitle, marginBottom: 0 }}>🧽 Wash Tools</div>
+        <button style={S.smallBtn} onClick={() => setForm(blank())}>+ Add</button>
+      </div>
+      {tools.length === 0 && <div style={S.emptySmall}>Loofahs, cloths, sponges, brushes — track what works and when to replace</div>}
+      {live.map(t => {
+        const st = washStatus(t, today), due = washDue(t), left = due ? daysBetween(today, due) : null;
+        const col = st === "Due for replacement" ? "#d4846a" : left !== null && left <= 7 ? "#c4a86a" : "#7a9e7e";
+        return (
+          <div key={t.id} style={S.stockRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={S.stockName}>{t.name}</span>
+                <span style={{ ...S.statusBadge, background: col + "22", color: col }}>{st === "In use" && left !== null ? (left <= 7 ? `Replace in ${left}d` : "In use") : st}</span>
+              </div>
+              <div style={S.brandPreview}>{t.type} · {t.where} · {money(t.price)}{cpw(t) ? ` · ${money(cpw(t))}/wk` : ""}</div>
+              {due && <div style={S.ingrPreview}>Replace by {shortDate(due)} · Made a difference: {t.difference}</div>}
+              <NoteBox text={t.notes} />
+              {t.observations && <div style={S.obsText}>{t.observations}</div>}
+              {open === t.id && (
+                <div style={{ ...S.trialSection }}>
+                  <div style={S.trialLabel}>Reviews</div>
+                  {(t.reviews || []).map(r => <div key={r.id} style={S.obsRow}><div><span style={S.obsDate}>{shortDate(r.date)}</span> <span style={S.obsTag}>{"★".repeat(r.rating)} · {r.verdict}</span>{r.notes && <div style={S.obsText}>{r.notes}</div>}</div></div>)}
+                  <div style={{ display: "flex", gap: 6, margin: "8px 0" }}>
+                    <div style={{ flex: 1 }}><Sel value={String(rev.rating)} onChange={v => setRev(r => ({ ...r, rating: Number(v) }))} options={["1", "2", "3", "4", "5"]} /></div>
+                    <div style={{ flex: 2 }}><Sel value={rev.verdict} onChange={v => setRev(r => ({ ...r, verdict: v }))} options={DIFF} /></div>
+                  </div>
+                  <input style={S.formInput} placeholder="Review notes" value={rev.notes} onChange={e => setRev(r => ({ ...r, notes: e.target.value }))} />
+                  <button style={{ ...S.primaryBtn, marginTop: 8 }} onClick={() => addReview(t)}>Add review</button>
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+                <button style={S.linkBtn} onClick={() => setOpen(open === t.id ? null : t.id)}>{open === t.id ? "Hide reviews" : `Reviews (${(t.reviews || []).length})`}</button>
+                <button style={S.linkBtn} onClick={() => replace(t)}>Mark replaced</button>
+              </div>
+            </div>
+            <button style={S.iconBtn} onClick={() => setForm(t)}>✎</button>
+            <button style={S.removeBtn} onClick={() => window.confirm(`Delete ${t.name}?`) && setTools(p => p.filter(x => x.id !== t.id))}>×</button>
+          </div>
+        );
+      })}
+      {old.length > 0 && (
+        <>
+          <div style={{ ...S.monthLabel, marginTop: 14 }}>History</div>
+          {old.map(t => <div key={t.id} style={{ ...S.stockRow, opacity: 0.75 }}><div style={{ flex: 1 }}><div style={S.stockName}>{t.name}</div><div style={S.brandPreview}>{money(t.price)} · {cpw(t) ? `${money(cpw(t))}/wk` : ""} · Made a difference: {t.difference}</div></div><button style={S.removeBtn} onClick={() => setTools(p => p.filter(x => x.id !== t.id))}>×</button></div>)}
+        </>
+      )}
+      {form && (
+        <Overlay close={() => setForm(null)}>
+          <div style={S.modalTitle}>🧽 {form.id ? "Edit" : "Add"} wash tool</div>
+          <Fld label="Product name"><input style={S.formInput} value={form.name} onChange={e => set("name", e.target.value)} /></Fld>
+          <Fld label="Tool type"><Sel value={form.type} onChange={v => setForm(f => ({ ...f, type: v, weeks: f.id ? f.weeks : WASH_WEEKS[v] }))} options={WASH_TYPES} /></Fld>
+          <Fld label="Where purchased"><input style={S.formInput} value={form.where} onChange={e => set("where", e.target.value)} /></Fld>
+          <Fld label="Price paid (R)"><input type="number" style={S.formInput} value={form.price} onChange={e => set("price", e.target.value)} /></Fld>
+          <div style={S.formRow}>
+            <div style={{ flex: 1 }}><label style={S.formLabel}>Purchased</label><input type="date" style={S.formInput} value={form.datePurchased} onChange={e => set("datePurchased", e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label style={S.formLabel}>First used</label><input type="date" style={S.formInput} value={form.dateFirstUsed} onChange={e => set("dateFirstUsed", e.target.value)} /></div>
+          </div>
+          <Fld label="Replace every (weeks)"><input type="number" style={S.formInput} value={form.weeks} onChange={e => set("weeks", e.target.value)} /></Fld>
+          <Fld label="Made a difference?"><Chips options={DIFF} value={form.difference} onChange={v => set("difference", v)} /></Fld>
+          <Fld label="Observations"><textarea style={{ ...S.textarea, height: 56 }} placeholder="Texture, breakouts, dryness..." value={form.observations} onChange={e => set("observations", e.target.value)} /></Fld>
+          <Fld label="📌 Important notes" note><textarea style={{ ...S.textarea, height: 56, borderColor: NOTE_COLOR + "66" }} value={form.notes} onChange={e => set("notes", e.target.value)} /></Fld>
+          <div style={S.modalBtns}><button style={S.cancelBtn} onClick={() => setForm(null)}>Cancel</button><button style={{ ...S.primaryBtn, flex: 1, opacity: ok ? 1 : 0.5 }} onClick={save}>Save</button></div>
+        </Overlay>
+      )}
+    </div>
+  );
+}
+
+// ── Extra items shown in the daily checklist (Today page)
+function RitualChecklist({ date }) {
+  const [g, setG] = useLS("glow_guasha", GS_EMPTY);
+  const masks = ls.get("glow_masks", []).filter(e => e.date === date);
+  const tools = ls.get("glow_wash_tools", []).filter(t => { if (t.retiredOn) return false; const d = washDue(t); return d && daysBetween(date, d) <= 7; });
+  const active = g.routines.find(r => r.id === g.activeId);
+  const done = active && g.log.some(l => l.routineId === active.id && l.date === date);
+  const toggle = () => setG(p => {
+    const has = p.log.some(l => l.routineId === active.id && l.date === date);
+    return { ...p, log: has ? p.log.filter(l => !(l.routineId === active.id && l.date === date)) : [...p.log, { id: uid(), routineId: active.id, date }] };
+  });
+  return (
+    <>
+      <OralChecks date={date} />
+      {(masks.length > 0 || active) && (
+        <div style={S.card}>
+          <div style={S.cardTitle}>✨ Rituals</div>
+          {masks.map(e => (
+            <div key={e.id} style={{ marginBottom: 8 }}>
+              <span style={S.stepName}>🧖 {e.mask}</span> <span style={{ ...S.statusBadge, background: (FEAT_COLORS[e.feature] || "#9a9a8a") + "22", color: FEAT_COLORS[e.feature] || "#9a9a8a" }}>{e.feature}</span>
+              <NoteBox text={e.notes} />
+            </div>
+          ))}
+          {active && (
+            <div style={S.stepRow}>
+              <button style={{ ...S.checkbox, ...(done ? { background: "#7a9e7e", borderColor: "#7a9e7e" } : {}) }} onClick={toggle}>{done && <span style={S.checkmark}>✓</span>}</button>
+              <div style={{ flex: 1 }}><span style={{ ...S.stepName, textDecoration: done ? "line-through" : "none", opacity: done ? 0.45 : 1 }}>{active.tool}: {active.name}</span><NoteBox text={active.notes} /></div>
+            </div>
+          )}
+        </div>
+      )}
+      {tools.length > 0 && (
+        <div style={S.card}>
+          <div style={S.cardTitle}>🧽 Replacement reminders</div>
+          {tools.map(t => { const left = daysBetween(date, washDue(t)); return <div key={t.id} style={S.noteReminder}>📌 {t.name}: {left < 0 ? `${-left}d overdue` : left === 0 ? "replace today" : `replace in ${left}d`}</div>; })}
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── Nav Bar ──────────────────────────────────────────────────
 function NavBar({ tab, setTab, alerts }) {
   const tabs = [
@@ -1479,6 +2118,7 @@ function NavBar({ tab, setTab, alerts }) {
     { id: "photo", icon: "📷", label: "Photos" },
     { id: "treatments", icon: "💆", label: "Care" },
     { id: "stock", icon: "🧴", label: "Stock" },
+    { id: "rituals", icon: "✨", label: "Rituals" },
     { id: "insights", icon: "📊", label: "Insights" },
     { id: "report", icon: "📋", label: "Report" },
   ];
@@ -1642,6 +2282,8 @@ function TodayPage({ selDate, getLog, updLog, toggleStep, products, newProd, set
 
       <RoutineBlock period="morning" label="🌅 Morning" products={products.morning} log={log} toggleStep={toggleStep} selDate={selDate} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} ingredients={ingredients} productMeta={productMeta} productData={productData} setModal={setModal} stockItems={stockItems} />
       <RoutineBlock period="evening" label="🌙 Evening" products={products.evening} log={log} toggleStep={toggleStep} selDate={selDate} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} ingredients={ingredients} productMeta={productMeta} productData={productData} setModal={setModal} stockItems={stockItems} />
+
+      <RitualChecklist date={selDate} />
 
       <div style={S.card}>
         <div style={S.cardTitle}>🪞 Skin Condition</div>
