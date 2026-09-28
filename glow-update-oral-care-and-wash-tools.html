@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glow Skin Care – Update: Oral Care &amp; Wash Tools</title>
+<style>
+  :root {
+    --bg: #fbf7f6;
+    --surface: #ffffff;
+    --ink: #2a2230;
+    --muted: #6b6273;
+    --line: #e6dde0;
+    --accent: #2f7a72;
+    --accent-soft: #e3f0ee;
+    --code-bg: #f1eaee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1c1720;
+      --surface: #262029;
+      --ink: #efe8f0;
+      --muted: #a89fb0;
+      --line: #3a3241;
+      --accent: #6fc2b8;
+      --accent-soft: #24393a;
+      --code-bg: #2f2734;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1, h2, h3 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    line-height: 1.25;
+    font-weight: 600;
+  }
+  h1 { font-size: clamp(2rem, 5vw, 2.8rem); margin: 0 0 12px; }
+  h2 { font-size: 1.7rem; margin: 56px 0 12px; padding-top: 24px; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.2rem; margin: 32px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; max-width: 70ch; }
+  .lede { font-size: 1.1rem; color: var(--muted); max-width: 60ch; }
+  .meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 20px;
+    margin: 28px 0 8px;
+    padding: 16px 20px;
+    background: var(--accent-soft);
+    border-radius: 10px;
+  }
+  .meta dt { font-weight: 600; }
+  .meta dd { margin: 0; }
+  nav ul { list-style: none; padding: 0; margin: 24px 0 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  nav a { color: var(--accent); text-decoration: none; border-bottom: 1px solid currentColor; }
+  nav a:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .table-wrap { overflow-x: auto; margin: 12px 0 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--accent-soft); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  ul { padding-left: 22px; margin: 0 0 16px; }
+  li { margin-bottom: 6px; max-width: 70ch; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+  pre {
+    background: var(--code-bg);
+    padding: 18px 20px;
+    border-radius: 10px;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    margin: 12px 0 20px;
+  }
+  .checks { list-style: none; padding: 0; }
+  .checks li { display: flex; gap: 10px; align-items: flex-start; }
+  .checks input { margin-top: 6px; accent-color: var(--accent); }
+  .note { border-left: 4px solid var(--accent); padding: 4px 0 4px 16px; color: var(--muted); }
+  footer { margin-top: 56px; color: var(--muted); font-size: 0.9rem; }
+  @media (max-width: 520px) {
+    main { padding-top: 32px; }
+    .meta { grid-template-columns: 1fr; gap: 0; }
+    .meta dd { margin-bottom: 10px; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Glow Skin Care: Oral Care &amp; Wash Tools</h1>
+  <p class="lede">A change request adding two new components to the existing app, written to attach to GitHub and update the current version.</p>
+  <dl class="meta">
+    <dt>Type</dt><dd>Feature addition</dd>
+    <dt>Scope</dt><dd>Two new components alongside Facial, Body, Hair and the daily checklist</dd>
+    <dt>Adds</dt><dd>Oral Care category; Wash Tools sub-section under Body</dd>
+  </dl>
+  <nav aria-label="On this page">
+    <ul>
+      <li><a href="#oral-care">Oral Care</a></li>
+      <li><a href="#wash-tools">Wash Tools</a></li>
+      <li><a href="#data-model">Data model</a></li>
+      <li><a href="#acceptance">Acceptance criteria</a></li>
+      <li><a href="#related">Related changes</a></li>
+    </ul>
+  </nav>
+</header>
+
+<section id="oral-care">
+  <h2>Component 1: Oral Care</h2>
+  <p><strong>Purpose.</strong> Catalogue teeth health and progress over time, alongside the products used, with a focus on tooth sensitivity and product ingredients.</p>
+  <p><strong>Placement.</strong> New category in the top panel beside Facial, Body and Hair.</p>
+
+  <h3>Product catalogue</h3>
+  <p>Each oral care product (toothpaste, mouthwash, floss, whitening, sensitivity treatments and so on) has these fields.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Product name</td><td>Text</td><td>Required</td></tr>
+        <tr><td>Brand</td><td>Text</td><td>Consistent with the brand field in other sections</td></tr>
+        <tr><td>Product type</td><td>Select</td><td>Toothpaste, mouthwash, floss, whitening, other</td></tr>
+        <tr><td>Full ingredients list</td><td>Long text</td><td>Required; listed as entered</td></tr>
+        <tr><td>Key actives</td><td>Tags</td><td>For example fluoride, potassium nitrate, hydroxyapatite; searchable and filterable</td></tr>
+        <tr><td>Ingredients to watch</td><td>Tags</td><td>Ingredients to avoid or monitor</td></tr>
+        <tr><td>Important notes</td><td>Text</td><td>Shown in a different colour in the daily checklist, same behaviour as other sections</td></tr>
+        <tr><td>Date started</td><td>Date</td><td></td></tr>
+        <tr><td>Status</td><td>Select</td><td>In use, finished, stopped</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Sensitivity tracker</h3>
+  <p>Logged entries that show progress over time.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Date</td><td>Date</td><td></td></tr>
+        <tr><td>Sensitivity level</td><td>Scale 0–10</td><td>0 is none, 10 is severe</td></tr>
+        <tr><td>Triggers</td><td>Multi-select</td><td>Cold, hot, sweet, acidic, brushing, air, other</td></tr>
+        <tr><td>Area</td><td>Select</td><td>Upper or lower; left, right or front</td></tr>
+        <tr><td>Notes</td><td>Text</td><td></td></tr>
+        <tr><td>Products in use</td><td>Linked</td><td>Auto-filled from products marked "In use"</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Progress view</h3>
+  <ul>
+    <li>Line chart of sensitivity level over time</li>
+    <li>Markers on the chart when a product was started or stopped</li>
+    <li>Filter by product, trigger or date range</li>
+    <li>Summary of average sensitivity before and after a product was introduced</li>
+  </ul>
+
+  <h3>Ingredient comparison</h3>
+  <ul>
+    <li>Select two or more products to compare their ingredients side by side</li>
+    <li>Highlights shared ingredients and ingredients that appear in only one product</li>
+    <li>Flags any product containing an ingredient tagged "Ingredients to watch"</li>
+  </ul>
+
+  <h3>Daily checklist integration</h3>
+  <ul>
+    <li>Oral care items appear in the daily checklist, morning and evening</li>
+    <li>Product notes display in the highlight colour as a reminder</li>
+    <li>Products can be picked from the oral care stock list when building a day's selection</li>
+  </ul>
+</section>
+
+<section id="wash-tools">
+  <h2>Component 2: Wash Tools</h2>
+  <p><strong>Purpose.</strong> Catalogue the tools used to wash the body (loofah, cloth, sponge, brush and so on), record whether each made a difference, and track when it is time to replace them.</p>
+  <p><strong>Placement.</strong> Sub-section within the Body category.</p>
+
+  <h3>Fields</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Product name</td><td>Text</td><td>Required</td></tr>
+        <tr><td>Tool type</td><td>Select</td><td>Loofah, washcloth, sponge, brush, mitt, other</td></tr>
+        <tr><td>Where purchased</td><td>Text</td><td>Store or website; required</td></tr>
+        <tr><td>Price paid</td><td>Number (currency)</td><td>Required</td></tr>
+        <tr><td>Date purchased</td><td>Date</td><td>Used to calculate replacement</td></tr>
+        <tr><td>Date first used</td><td>Date</td><td></td></tr>
+        <tr><td>Replace every</td><td>Number (weeks)</td><td>Suggested defaults by tool type, editable</td></tr>
+        <tr><td>Replacement due</td><td>Auto date</td><td>Date first used plus the replace-every interval</td></tr>
+        <tr><td>Status</td><td>Select</td><td>In use, due for replacement, retired</td></tr>
+        <tr><td>Made a difference?</td><td>Select</td><td>Yes, somewhat, no, too early to tell</td></tr>
+        <tr><td>Observations</td><td>Long text</td><td>What changed: texture, breakouts, dryness and so on</td></tr>
+        <tr><td>Important notes</td><td>Text</td><td>Shown in the highlight colour in the daily checklist</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Replacement reminders</h3>
+  <ul>
+    <li>Status changes to "Due for replacement" automatically when the due date passes</li>
+    <li>The daily checklist shows a highlighted reminder when a tool is due or within 7 days of due</li>
+    <li>Marking a tool as replaced archives it and prompts to add the new tool, pre-filling name, store and price from the previous entry</li>
+  </ul>
+
+  <h3>Effectiveness review</h3>
+  <ul>
+    <li>Each tool has review entries: date, rating (1–5) and a verdict on whether it made a difference</li>
+    <li>A history view compares tools used over time, including cost per week of use (price divided by weeks used)</li>
+  </ul>
+</section>
+
+<section id="data-model">
+  <h2>Data model additions</h2>
+<pre><code>OralProduct {
+  id, name, brand, type, ingredients, keyActives[], watchIngredients[],
+  notes, dateStarted, status
+}
+
+SensitivityEntry {
+  id, date, level (0-10), triggers[], area, notes, productIds[]
+}
+
+WashTool {
+  id, name, type, purchasedFrom, price, datePurchased, dateFirstUsed,
+  replaceEveryWeeks, replacementDue, status, madeDifference,
+  observations, notes
+}
+
+WashToolReview {
+  id, toolId, date, rating (1-5), verdict, notes
+}</code></pre>
+</section>
+
+<section id="acceptance">
+  <h2>Acceptance criteria</h2>
+  <ul class="checks">
+    <li><input type="checkbox" id="c1" disabled><label for="c1">Oral Care category appears in the top panel beside Facial, Body and Hair</label></li>
+    <li><input type="checkbox" id="c2" disabled><label for="c2">Oral products can be added with brand, full ingredients, key actives and notes</label></li>
+    <li><input type="checkbox" id="c3" disabled><label for="c3">Sensitivity entries can be logged and displayed on a progress chart with product start and stop markers</label></li>
+    <li><input type="checkbox" id="c4" disabled><label for="c4">Two or more oral products can be compared by ingredients</label></li>
+    <li><input type="checkbox" id="c5" disabled><label for="c5">Wash Tools sub-section exists under Body with name, where purchased and price as required fields</label></li>
+    <li><input type="checkbox" id="c6" disabled><label for="c6">Replacement due date is calculated automatically and surfaces in the daily checklist</label></li>
+    <li><input type="checkbox" id="c7" disabled><label for="c7">"Made a difference?" verdict and observations can be recorded per tool</label></li>
+    <li><input type="checkbox" id="c8" disabled><label for="c8">Notes on both components display in the highlight colour in the daily checklist</label></li>
+    <li><input type="checkbox" id="c9" disabled><label for="c9">Existing Facial, Body, Hair and checklist functionality is unaffected</label></li>
+  </ul>
+</section>
+
+<section id="related">
+  <h2>Related planned changes</h2>
+  <ul>
+    <li>Stock component under Facial, Body and Hair (oral care stock should follow the same pattern)</li>
+    <li>Brand and important-notes fields across all product sections</li>
+    <li>TikTok Try category</li>
+  </ul>
+</section>
+
+<footer>Glow Skin Care change request: Oral Care &amp; Wash Tools.</footer>
+
+</main>
+</body>
+</html>
