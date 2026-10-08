@@ -66,6 +66,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // ─── Constants ────────────────────────────────────────────────
 const SKIN_CONDITIONS = ["✨ Clear","🌿 Calm","🔴 Breakout","💧 Dry","🫧 Oily","🌸 Sensitive","😴 Tired"];
 const MOODS = ["😊 Happy","😌 Calm","😤 Stressed","😴 Tired","🥰 Glowing"];
+const BODY_CONDITIONS = ["✨ Smooth","💧 Dry","🔴 Breakout","🌸 Irritated","🫧 Oily","😴 Tired"];
 const DEFAULT_MORNING = ["Cleanser","Toner","Serum","Moisturizer","SPF"];
 const DEFAULT_EVENING = ["Makeup Remover","Cleanser","Toner","Treatment","Night Cream"];
 const DEFAULT_BODY_PRODUCTS = ["Body Wash","Lotion","Body Butter"];
@@ -232,6 +233,7 @@ function App() {
   const [bodyLogs, setBodyLogs] = useState(() => ls.get("glow_body_logs", {}));
   const [bodyProductData, setBodyProductData] = useState(() => ls.get("glow_body_productdata", {}));
   const [bodyReminders, setBodyReminders] = useState(() => ls.get("glow_body_reminders", false));
+  const [bodyNotes, setBodyNotes] = useState(() => ls.get("glow_body_notes", {}));
 
   // Hair: weekly product schedule + haircut tracker
   const [hairProducts, setHairProducts] = useState(() => ls.get("glow_hair_products", [...DEFAULT_HAIR_PRODUCTS]));
@@ -272,6 +274,7 @@ function App() {
   useEffect(() => { ls.set("glow_body_logs", bodyLogs); }, [bodyLogs]);
   useEffect(() => { ls.set("glow_body_productdata", bodyProductData); }, [bodyProductData]);
   useEffect(() => { ls.set("glow_body_reminders", bodyReminders); }, [bodyReminders]);
+  useEffect(() => { ls.set("glow_body_notes", bodyNotes); }, [bodyNotes]);
   useEffect(() => { ls.set("glow_hair_products", hairProducts); }, [hairProducts]);
   useEffect(() => { ls.set("glow_hair_schedule", hairSchedule); }, [hairSchedule]);
   useEffect(() => { ls.set("glow_hair_logs", hairLogs); }, [hairLogs]);
@@ -371,6 +374,7 @@ function App() {
   };
 
   const addTreatment = (t) => setTreatments(p => [...p, { ...t, id: Date.now(), history: [] }]);
+  const updateTreatment = (id, patch) => setTreatments(p => p.map(t => t.id === id ? { ...t, ...patch } : t));
   const logTreatment = (id, date) => setTreatments(p => p.map(t => t.id === id ? { ...t, history: [...(t.history || []), date], lastDone: date } : t));
   const removeTreatment = (id) => setTreatments(p => p.filter(t => t.id !== id));
 
@@ -402,6 +406,7 @@ function App() {
       });
     }
   };
+  const saveBodyNotes = (d, entry) => { setBodyNotes(p => ({ ...p, [d]: { ...entry, savedAt: new Date().toISOString() } })); flash(); };
   const addBodyProduct = (name) => {
     const v = (name || "").trim(); if (!v || bodyProducts.includes(v)) return;
     setBodyProducts(p => [...p, v]);
@@ -590,6 +595,7 @@ function App() {
 
   return (
     <div style={S.app}>
+      <ApplicatorReminders />
       <Header alerts={[...stockAlerts, ...bodyStockAlerts, ...hairStockAlerts]} />
       <CategoryTabs category={category} setCategory={setCategory} badges={{ tiktok: reflectionsDue }} />
       <div style={S.content}>
@@ -598,7 +604,7 @@ function App() {
             {tab === "today"      && <TodayPage selDate={selDate} setSelDate={setSelDate} getLog={getLog} updLog={updLog} toggleStep={toggleStep} products={products} newProd={newProd} setNewProd={setNewProd} addingProd={addingProd} setAddingProd={setAddingProd} addProduct={addProduct} removeProd={removeProd} completionRate={completionRate} saved={saved} ingredients={ingredients} productMeta={productMeta} photos={photos} addPhoto={addPhoto} setModal={setModal} uvData={uvData} uvLoading={uvLoading} requestLocation={requestLocation} productData={productData} setProductData={setProductData} stockAlerts={stockAlerts} stockItems={stock.facial} />}
             {tab === "calendar"   && <CalendarPage selDate={selDate} setSelDate={setSelDate} calMonth={calMonth} setCalMonth={setCalMonth} hasLog={hasLog} completionRate={completionRate} photos={photos} setTab={setTab} />}
             {tab === "photo"      && <PhotoLogPage photos={photos} setModal={setModal} addPhoto={addPhoto} removePhoto={removePhoto} selDate={selDate} />}
-            {tab === "treatments" && <TreatmentsPage treatments={treatments} addTreatment={addTreatment} logTreatment={logTreatment} removeTreatment={removeTreatment} setModal={setModal} />}
+            {tab === "treatments" && <TreatmentsPage treatments={treatments} addTreatment={addTreatment} logTreatment={logTreatment} removeTreatment={removeTreatment} updateTreatment={updateTreatment} setModal={setModal} />}
             {tab === "stock"      && <StockPage items={stock.facial} inUse={[...products.morning, ...products.evening]} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />}
             {tab === "rituals"    && <RitualsPage />}
             {tab === "insights"   && <InsightsPage logs={logs} products={products} streak={streak} completionRate={completionRate} hasLog={hasLog} ingredients={ingredients} treatments={treatments} productData={productData} setSelDate={setSelDate} setTab={setTab} />}
@@ -622,6 +628,8 @@ function App() {
             addToStock={addToStock}
             removeFromStock={removeFromStock}
             setModal={setModal}
+            bodyNotes={bodyNotes}
+            saveBodyNotes={saveBodyNotes}
           />
         )}
         {category === "oral" && <OralCarePage />}
@@ -698,7 +706,7 @@ function CategoryTabs({ category, setCategory, badges = {} }) {
 }
 
 // ─── Body Skin: weekly product schedule ─────────────────────────
-function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProduct, addBodyProduct, removeBodyProduct, toggleBodyScheduleDay, bodyProductData, productMeta, bodyReminders, enableBodyReminders, stockItems, addToStock, removeFromStock, setModal }) {
+function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProduct, addBodyProduct, removeBodyProduct, toggleBodyScheduleDay, bodyProductData, productMeta, bodyReminders, enableBodyReminders, stockItems, addToStock, removeFromStock, setModal, bodyNotes, saveBodyNotes }) {
   const today = todayStr();
   const todayCode = DAYS_SHORT[new Date().getDay()];
   const todayLog = bodyLogs[today] || {};
@@ -812,10 +820,79 @@ function BodySchedulePage({ bodyProducts, bodySchedule, bodyLogs, toggleBodyProd
         )}
       </div>
 
+      <WeekTracker title="Body schedule — this week" products={bodyProducts} schedule={bodySchedule} logs={bodyLogs} toggle={toggleBodyProduct} />
+
+      {/* Notes & observations */}
+      <BodyObservations date={today} bodyNotes={bodyNotes || {}} saveBodyNotes={saveBodyNotes} />
+
       {/* Stock */}
+      <ShavingTracker />
       <WashTools />
+      <ApplicatorsCard scope="body" />
       <StockCard scope="body" items={stockItems || []} inUse={bodyProducts} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />
     </div>
+  );
+}
+
+// ─── Body Skin: condition, mood, notes & observations (saved per day) ───
+function BodyObservations({ date, bodyNotes, saveBodyNotes }) {
+  const saved = bodyNotes[date] || {};
+  const [condition, setCondition] = useState(saved.condition || null);
+  const [mood, setMood] = useState(saved.mood || null);
+  const [notes, setNotes] = useState(saved.notes || "");
+  const [justSaved, setJustSaved] = useState(false);
+
+  const hasUnsaved = condition !== (saved.condition || null) || mood !== (saved.mood || null) || notes !== (saved.notes || "");
+  const save = () => {
+    saveBodyNotes(date, { condition, mood, notes });
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 1800);
+  };
+  const past = Object.entries(bodyNotes)
+    .filter(([d, e]) => d !== date && (e.notes || e.condition || e.mood))
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 5);
+
+  return (
+    <>
+      <div style={S.card}>
+        <div style={S.cardTitle}>🪞 Body Skin Condition</div>
+        <TagPicker tags={BODY_CONDITIONS} value={condition} onChange={setCondition} color="#7a9e7e" />
+      </div>
+      <div style={S.card}>
+        <div style={S.cardTitle}>💭 Mood</div>
+        <TagPicker tags={MOODS} value={mood} onChange={setMood} color="#c4a86a" />
+      </div>
+      <div style={S.card}>
+        <div style={S.cardTitle}>📝 Notes & Observations</div>
+        <textarea style={S.textarea} rows={3} placeholder="How did your body skin feel today? Any reactions, dryness, changes..." value={notes} onChange={e => setNotes(e.target.value)} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "10px 0 8px" }}>
+          <div style={{ fontSize: 12, color: hasUnsaved ? "#c4a86a" : "#9a8e7a" }}>
+            {hasUnsaved ? "You have unsaved notes." : saved.savedAt ? "Everything's saved." : "Add a note, then save it."}
+          </div>
+          {!hasUnsaved && saved.savedAt && (
+            <span style={{ fontSize: 11, color: "#7a9e7e" }}>Saved {new Date(saved.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          )}
+        </div>
+        <button style={{ ...S.primaryBtn, width: "100%", opacity: hasUnsaved ? 1 : 0.55, cursor: hasUnsaved ? "pointer" : "default" }} onClick={save} disabled={!hasUnsaved}>
+          {justSaved ? "✓ Saved" : "💾 Save Notes & Observations"}
+        </button>
+        {past.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={S.monthLabel}>Recent entries</div>
+            {past.map(([d, e]) => (
+              <div key={d} style={{ borderBottom: "1px solid #f5f0e8", padding: "6px 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, fontWeight: "700", color: "#4a5c4a" }}>{shortDate(d)}</span>
+                  <span style={{ fontSize: 11, color: "#9a8e7a" }}>{[e.condition, e.mood].filter(Boolean).join(" · ")}</span>
+                </div>
+                {e.notes && <div style={{ fontSize: 12, color: "#6a5e4e" }}>{e.notes}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -985,8 +1062,11 @@ function HairPage({ hairProducts, hairSchedule, hairLogs, toggleHairProduct, add
         )}
       </div>
 
+      <WeekTracker title="Wash schedule — this week" products={hairProducts} schedule={hairSchedule} logs={hairLogs} toggle={toggleHairProduct} />
+
       {/* Stock */}
       <StockCard scope="hair" items={stockItems || []} inUse={hairProducts} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />
+      <ApplicatorsCard scope="hair" />
     </div>
   );
 }
@@ -1100,6 +1180,7 @@ function StockPage({ items, inUse, productMeta, addToStock, removeFromStock, set
     <div style={S.page}>
       <div style={S.pageTitle}>Facial Stock</div>
       <StockCard scope="facial" items={items} inUse={inUse} productMeta={productMeta} addToStock={addToStock} removeFromStock={removeFromStock} setModal={setModal} />
+      <ApplicatorsCard scope="facial" />
     </div>
   );
 }
@@ -1151,6 +1232,7 @@ function TikTokPage({ trials, updateTrial, removeTrial, setModal }) {
           {section("Finished", done)}
         </>
       )}
+      <ApplicatorsCard scope="tiktok" />
     </div>
   );
 }
@@ -1538,7 +1620,11 @@ function MaskCalendar() {
     setForm(null);
   };
   const del = (id) => { if (window.confirm("Delete this mask entry?")) setEntries(p => p.filter(e => e.id !== id)); };
-  const counts = masks.map(m => [m, entries.filter(e => e.mask === m).length]).sort((a, b) => b[1] - a[1]);
+  const counts = masks.map(m => {
+    const list = entries.filter(e => e.mask === m);
+    const rated = list.filter(e => e.rating > 0).map(e => e.rating);
+    return [m, list.length, rated.length ? avg(rated) : null];
+  }).sort((a, b) => b[1] - a[1]);
 
   return (
     <>
@@ -1567,7 +1653,7 @@ function MaskCalendar() {
           <label style={S.formLabel}>Filter by mask or feature</label>
           <Sel value={filter} onChange={setFilter} options={["All", ...FEATURES, ...masks.filter(m => !FEATURES.includes(m))]} />
         </div>
-        {counts.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>{counts.map(([m, n]) => <span key={m} style={S.ingrTag}>{m} · {n}×</span>)}</div>}
+        {counts.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>{counts.map(([m, n, r]) => <span key={m} style={S.ingrTag}>{m} · {n}×{r !== null ? ` · ★ ${r.toFixed(1)}` : ""}</span>)}</div>}
       </div>
 
       <div style={S.card}>
@@ -1586,6 +1672,7 @@ function MaskCalendar() {
               {e.brand && <div style={S.brandPreview}>{e.brand}{e.minutes ? ` · ${e.minutes} min` : ""}</div>}
               <NoteBox text={e.notes} />
               {e.observation && <div style={S.obsText}>{e.observation}</div>}
+              <RatingGallery rating={e.rating} photos={e.photos} onChange={(patch) => setEntries(p => p.map(x => x.id === e.id ? { ...x, ...patch } : x))} />
             </div>
             <button style={S.iconBtn} onClick={() => setForm(e)}>✎</button>
             <button style={S.removeBtn} onClick={() => del(e.id)}>×</button>
@@ -1944,6 +2031,8 @@ function OralCarePage() {
         )}
       </div>
 
+      <ApplicatorsCard scope="oral" />
+
       {form && (
         <Overlay close={() => setForm(null)}>
           <div style={S.modalTitle}>🦷 {form.id ? "Edit" : "Add"} product</div>
@@ -2107,6 +2196,377 @@ function RitualChecklist({ date }) {
         </div>
       )}
     </>
+  );
+}
+
+// ─── Star rating + photo gallery (masks & treatments) ──────────
+function StarRating({ value, onChange, size = 24 }) {
+  const v = value || 0;
+  return (
+    <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
+      {[1, 2, 3, 4, 5].map(n => (
+        <button key={n} aria-label={`${n} star${n > 1 ? "s" : ""}`} onClick={() => onChange(v === n ? 0 : n)}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: size, lineHeight: 1, color: n <= v ? "#c4a86a" : "#d8d0c2" }}>★</button>
+      ))}
+      <span style={{ fontSize: 11, color: "#9a8e7a", marginLeft: 6 }}>{v ? `${v}/5` : "Not rated"}</span>
+    </div>
+  );
+}
+
+function RatingGallery({ rating, photos, onChange }) {
+  const list = photos || [];
+  const [view, setView] = useState(null);
+  const fileRef = useRef();
+  const addPhotos = (files) => {
+    Array.from(files).forEach(f => shrinkImage(f, img => onChange({ photos: [...(photos || []), { id: uid(), date: todayStr(), img }] })));
+  };
+  return (
+    <div style={S.trialSection}>
+      <div style={S.trialLabel}>⭐ How much did you like it?</div>
+      <div style={{ margin: "6px 0 10px" }}><StarRating value={rating} onChange={(v) => onChange({ rating: v })} /></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <span style={S.trialLabel}>📷 Gallery ({list.length})</span>
+        <button style={S.smallBtn} onClick={() => fileRef.current.click()}>+ Photo</button>
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => { const f = e.target.files[0]; if (f) addPhotos([f]); e.target.value = ""; }} />
+      {list.length === 0 ? <div style={S.emptySmall}>No photos yet</div> : (
+        <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+          {[...list].reverse().map(p => (
+            <div key={p.id} style={{ flexShrink: 0, width: 80 }}>
+              <img src={p.img} alt="" style={{ width: 80, height: 80, borderRadius: 10, objectFit: "cover", cursor: "pointer" }} onClick={() => setView(p)} />
+              <div style={{ fontSize: 10, color: "#7a6e5a" }}>{shortDate(p.date)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {view && (
+        <Overlay close={() => setView(null)}>
+          <img src={view.img} alt="" style={{ width: "100%", borderRadius: 12, maxHeight: 360, objectFit: "contain", marginBottom: 12 }} />
+          <div style={{ fontSize: 12, color: "#7a6e5a", marginBottom: 10 }}>{shortDate(view.date)}</div>
+          <div style={S.modalBtns}>
+            <button style={S.cancelBtn} onClick={() => { if (window.confirm("Delete this photo?")) { onChange({ photos: list.filter(x => x.id !== view.id) }); setView(null); } }}>Delete</button>
+            <button style={{ ...S.primaryBtn, flex: 1 }} onClick={() => setView(null)}>Close</button>
+          </div>
+        </Overlay>
+      )}
+    </div>
+  );
+}
+
+// ─── Week tracker: fixed schedule vs what actually happened ────
+const DEV_MISSED = "#d4846a";
+const DEV_EXTRA = "#7b4fa0";
+function WeekTracker({ title, products, schedule, logs, toggle }) {
+  const [offset, setOffset] = useState(0);
+  const today = todayStr();
+  const base = new Date(today + "T12:00:00");
+  base.setDate(base.getDate() - base.getDay() - offset * 7);
+  const dates = Array.from({ length: 7 }, (_, i) => { const d = new Date(base); d.setDate(d.getDate() + i); return d.toISOString().split("T")[0]; });
+  let missed = 0, extra = 0;
+  const cell = (name, d, i) => {
+    const sched = (schedule[name] || []).includes(DAYS_SHORT[i]);
+    const done = !!(logs[d] || {})[name];
+    const future = d > today;
+    let state = "empty";
+    if (sched && done) state = "ok";
+    else if (sched && !done) state = d < today ? "missed" : "due";
+    else if (!sched && done) state = "extra";
+    if (state === "missed") missed++;
+    if (state === "extra") extra++;
+    const styles = {
+      ok: { background: "#7a9e7e", borderColor: "#7a9e7e", color: "#fff" },
+      missed: { background: DEV_MISSED + "22", borderColor: DEV_MISSED, color: DEV_MISSED },
+      extra: { background: DEV_EXTRA, borderColor: DEV_EXTRA, color: "#fff" },
+      due: { background: "#fff", borderColor: "#7a9e7e", color: "#7a9e7e", borderStyle: "dashed" },
+      empty: { background: "#faf7f2", borderColor: "#ebe4d8", color: "#d8d0c2" },
+    }[state];
+    const sym = { ok: "✓", missed: "✕", extra: "✓", due: "•", empty: "" }[state];
+    return (
+      <button key={d} disabled={future} onClick={() => toggle(d, name)} title={`${name} · ${shortDate(d)}`}
+        style={{ flex: 1, height: 28, borderRadius: 8, border: "1.5px solid", fontSize: 12, fontWeight: "700", padding: 0, cursor: future ? "default" : "pointer", opacity: future && state === "empty" ? 0.5 : 1, fontFamily: "inherit", ...styles }}>{sym}</button>
+    );
+  };
+  const rows = products.map(name => <div key={name} style={{ marginBottom: 10 }}>
+    <div style={{ fontSize: 12, fontWeight: "700", color: "#3a4a3a", marginBottom: 4 }}>{name}</div>
+    <div style={{ display: "flex", gap: 4 }}>{dates.map((d, i) => cell(name, d, i))}</div>
+  </div>);
+  return (
+    <div style={S.card}>
+      <div style={S.cardTitle}>🗓 {title}</div>
+      <div style={S.calNav}>
+        <button style={S.calNavBtn} onClick={() => setOffset(o => o + 1)}>‹</button>
+        <span style={{ fontSize: 13, fontWeight: "700", color: "#3a4a3a" }}>{shortDate(dates[0])} – {shortDate(dates[6])}</span>
+        <button style={{ ...S.calNavBtn, opacity: offset === 0 ? 0.3 : 1 }} disabled={offset === 0} onClick={() => setOffset(o => Math.max(0, o - 1))}>›</button>
+      </div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+        {dates.map((d, i) => <div key={d} style={{ flex: 1, textAlign: "center", fontSize: 10, color: d === today ? "#4a5c4a" : "#a09080", fontWeight: d === today ? "700" : "400" }}>{DAYS_SHORT[i]}</div>)}
+      </div>
+      {products.length === 0 ? <div style={S.emptySmall}>Add products to your schedule first</div> : rows}
+      <div style={S.legend}>
+        <span style={S.legendItem}><span style={{ ...S.legendDot, background: "#7a9e7e" }} />On schedule</span>
+        <span style={S.legendItem}><span style={{ ...S.legendDot, background: DEV_MISSED }} />Missed</span>
+        <span style={S.legendItem}><span style={{ ...S.legendDot, background: DEV_EXTRA }} />Extra / moved</span>
+      </div>
+      <div style={{ fontSize: 12, textAlign: "center", marginTop: 8, color: missed + extra ? DEV_EXTRA : "#7a9e7e" }}>
+        {missed + extra === 0 ? "Right on schedule" : `${missed + extra} deviation${missed + extra > 1 ? "s" : ""}: ${missed} missed, ${extra} extra`}
+      </div>
+      <div style={{ fontSize: 10, color: "#a09080", textAlign: "center", marginTop: 4 }}>Tap a day to log or undo it. Change the fixed days in the schedule above.</div>
+    </div>
+  );
+}
+
+// ─── Applicators (tools & applicators per section) ─────────────
+const APPLICATOR_TYPES = ["Brush", "Sponge", "Roller", "Tool", "Cloth", "Other"];
+const APPLICATOR_DEFAULT_WEEKS = { Brush: 12, Sponge: 4, Roller: 26, Tool: 26, Cloth: 8, Other: 12 };
+// Preset use counts: [wash every N uses, replace after N uses] — editable per applicator
+const APPLICATOR_USE_DEFAULTS = { Brush: [7, 150], Sponge: [1, 30], Roller: [10, 100], Tool: [10, 100], Cloth: [1, 30], Other: [7, 60] };
+
+// Countdown state for one applicator. Wash countdown resets on cleaning; both reset on replacement.
+const appState = (a) => {
+  const washLeft = a.washEvery > 0 ? a.washEvery - (a.usesSinceClean || 0) : null;
+  const replaceLeft = a.replaceAfter > 0 ? a.replaceAfter - (a.usesSinceReplace || 0) : null;
+  return { washLeft, replaceLeft, washDue: washLeft !== null && washLeft <= 0, replaceDue: replaceLeft !== null && replaceLeft <= 0 };
+};
+const requestNotifyPermission = (cb) => {
+  if (!("Notification" in window)) { cb(false); return; }
+  if (Notification.permission === "granted") { cb(true); return; }
+  Notification.requestPermission().then(p => cb(p === "granted"));
+};
+
+// Always mounted: sends one reminder per cycle when an applicator hits its wash or replace count (while the app is open)
+function ApplicatorReminders() {
+  useEffect(() => {
+    const check = () => {
+      if (!ls.get("glow_applicator_reminders", false)) return;
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      const all = ls.get("glow_applicators", {});
+      const sent = ls.get("glow_applicator_notified", {});
+      let changed = false;
+      Object.values(all).flat().forEach(a => {
+        const st = appState(a);
+        if (st.washDue && sent[a.id + "w"] !== (a.washCycle || 0)) {
+          try { new Notification("glōw — time to wash", { body: `${a.name} has reached ${a.washEvery} uses and needs washing.` }); } catch {}
+          sent[a.id + "w"] = a.washCycle || 0; changed = true;
+        }
+        if (st.replaceDue && sent[a.id + "r"] !== (a.replaceCycle || 0)) {
+          try { new Notification("glōw — time to replace", { body: `${a.name} has reached ${a.replaceAfter} uses and needs replacing.` }); } catch {}
+          sent[a.id + "r"] = a.replaceCycle || 0; changed = true;
+        }
+      });
+      if (changed) ls.set("glow_applicator_notified", sent);
+    };
+    check();
+    const t = setInterval(check, 5000);
+    return () => clearInterval(t);
+  }, []);
+  return null;
+}
+
+function ApplicatorsCard({ scope }) {
+  const [all, setAll] = useLS("glow_applicators", {});
+  const [remindersOn, setRemindersOn] = useLS("glow_applicator_reminders", false);
+  const items = all[scope] || [];
+  const [form, setForm] = useState(null);
+  const today = todayStr();
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setItems = (fn) => setAll(p => ({ ...p, [scope]: fn(p[scope] || []) }));
+  const blank = () => ({ name: "", what: "", type: "Brush", brand: "", price: "", lastCleaned: "", replaceOn: "", washEvery: APPLICATOR_USE_DEFAULTS.Brush[0], replaceAfter: APPLICATOR_USE_DEFAULTS.Brush[1], usesSinceClean: 0, usesSinceReplace: 0, washCycle: 0, replaceCycle: 0 });
+  const ok = form && form.name.trim();
+  const save = () => {
+    if (!ok) return;
+    const a = { ...form, name: form.name.trim(), washEvery: Math.max(0, Number(form.washEvery) || 0), replaceAfter: Math.max(0, Number(form.replaceAfter) || 0) };
+    setItems(list => a.id ? list.map(x => x.id === a.id ? a : x) : [...list, { ...a, id: uid() }]);
+    setForm(null);
+  };
+  const logUse = (id) => setItems(list => list.map(x => x.id === id ? { ...x, usesSinceClean: (x.usesSinceClean || 0) + 1, usesSinceReplace: (x.usesSinceReplace || 0) + 1 } : x));
+  const undoUse = (id) => setItems(list => list.map(x => x.id === id ? { ...x, usesSinceClean: Math.max(0, (x.usesSinceClean || 0) - 1), usesSinceReplace: Math.max(0, (x.usesSinceReplace || 0) - 1) } : x));
+  // Cleaning resets the wash countdown
+  const cleaned = (id) => setItems(list => list.map(x => x.id === id ? { ...x, lastCleaned: today, usesSinceClean: 0, washCycle: (x.washCycle || 0) + 1 } : x));
+  // Replacement resets both countdowns
+  const replaced = (a) => {
+    if (!window.confirm(`Mark ${a.name} as replaced today? Both countdowns will restart.`)) return;
+    const w = APPLICATOR_DEFAULT_WEEKS[a.type] || 12;
+    setItems(list => list.map(x => x.id === a.id ? { ...x, replacedOn: today, lastCleaned: "", replaceOn: addDaysStr(today, w * 7), usesSinceClean: 0, usesSinceReplace: 0, washCycle: (x.washCycle || 0) + 1, replaceCycle: (x.replaceCycle || 0) + 1 } : x));
+  };
+  const remove = (a) => { if (window.confirm(`Delete ${a.name}?`)) setItems(list => list.filter(x => x.id !== a.id)); };
+  const enableReminders = () => requestNotifyPermission(ok2 => setRemindersOn(ok2));
+  const needing = items.map(a => ({ a, st: appState(a) })).filter(({ st }) => st.washDue || st.replaceDue);
+
+  const countdown = (label, left, total, used, due) => {
+    if (left === null) return null;
+    const col = due ? "#d4846a" : left <= 2 ? "#c4a86a" : "#7a9e7e";
+    return (
+      <div style={{ marginTop: 6 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: col, fontWeight: "700" }}>
+          <span>{due ? `${label} now` : `${label} in ${left} use${left === 1 ? "" : "s"}`}</span>
+          <span style={{ color: "#9a8e7a", fontWeight: "400" }}>{Math.min(used, total)}/{total} uses</span>
+        </div>
+        <ProgressBar value={total ? Math.min(1, used / total) : 0} color={col} />
+      </div>
+    );
+  };
+
+  return (
+    <div style={S.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ ...S.cardTitle, marginBottom: 0 }}>🖌 Applications</div>
+        <button style={S.smallBtn} onClick={() => setForm(blank())}>+ Add</button>
+      </div>
+      <div style={{ fontSize: 11, color: "#9a8e7a", marginBottom: 6 }}>Count each use against a preset — washing restarts the wash countdown, replacing restarts both.</div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: "#f5f0e8", borderRadius: 10, padding: "8px 10px", marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: "#7a6e5a", lineHeight: 1.45 }}>
+          {remindersOn ? "🔔 Reminders on — you'll get a nudge when something needs washing or replacing (while the app is open)." : "🔔 Get a reminder when an applicator needs washing or replacing."}
+        </div>
+        {!remindersOn && <button style={S.uvLocationBtn} onClick={enableReminders}>Enable</button>}
+      </div>
+
+      {needing.length > 0 && (
+        <div style={S.stockBanner}>
+          <div style={{ fontSize: 11, fontWeight: "700", color: "#c4a86a", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>⚠️ Needs attention</div>
+          {needing.map(({ a, st }) => (
+            <div key={a.id} style={{ fontSize: 12, color: "#4a5c4a" }}>
+              {a.name}: {[st.washDue && "wash now", st.replaceDue && "replace now"].filter(Boolean).join(" · ")}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {items.length === 0 && <div style={S.emptySmall}>No applications added yet</div>}
+      {items.map(a => {
+        const st = appState(a);
+        const left = a.replaceOn ? daysBetween(today, a.replaceOn) : null;
+        const col = left === null ? "#9a9a8a" : left < 0 ? "#d4846a" : left <= 7 ? "#c4a86a" : "#7a9e7e";
+        const label = left === null ? null : left < 0 ? `Overdue ${-left}d` : left === 0 ? "Replace today" : `Replace in ${left}d`;
+        const sinceClean = a.lastCleaned ? daysBetween(a.lastCleaned, today) : null;
+        return (
+          <div key={a.id} style={S.stockRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={S.stockName}>{a.name}</span>
+                {st.washDue && <span style={{ ...S.statusBadge, background: "#d4846a22", color: "#d4846a" }}>Wash now</span>}
+                {st.replaceDue && <span style={{ ...S.statusBadge, background: "#d4846a22", color: "#d4846a" }}>Replace now</span>}
+                {label && <span style={{ ...S.statusBadge, background: col + "22", color: col }}>{label}</span>}
+              </div>
+              <div style={S.brandPreview}>{[a.type, a.brand, a.price && (String(a.price).startsWith("R") ? a.price : "R" + a.price)].filter(Boolean).join(" · ")}</div>
+              {a.what && <div style={S.obsText}>{a.what}</div>}
+              <div style={S.ingrPreview}>
+                {a.lastCleaned ? `Cleaned ${shortDate(a.lastCleaned)} (${sinceClean === 0 ? "today" : sinceClean + "d ago"})` : "Not cleaned yet"}
+                {a.replaceOn ? ` · Replace by ${shortDate(a.replaceOn)}` : ""}
+              </div>
+              {countdown("Wash", st.washLeft, a.washEvery, a.usesSinceClean || 0, st.washDue)}
+              {countdown("Replace", st.replaceLeft, a.replaceAfter, a.usesSinceReplace || 0, st.replaceDue)}
+              <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap" }}>
+                <button style={S.linkBtn} onClick={() => logUse(a.id)}>＋ Log a use</button>
+                <button style={S.linkBtn} onClick={() => undoUse(a.id)}>↶ Undo use</button>
+                <button style={S.linkBtn} onClick={() => cleaned(a.id)}>🫧 Cleaned</button>
+                <button style={S.linkBtn} onClick={() => replaced(a)}>↺ Replaced</button>
+              </div>
+            </div>
+            <button style={S.iconBtn} onClick={() => setForm(a)}>✎</button>
+            <button style={S.removeBtn} onClick={() => remove(a)}>×</button>
+          </div>
+        );
+      })}
+      {form && (
+        <Overlay close={() => setForm(null)}>
+          <div style={S.modalTitle}>🖌 {form.id ? "Edit" : "Add"} application</div>
+          <Fld label="Name"><input style={S.formInput} placeholder="e.g. Foundation brush" value={form.name} onChange={e => set("name", e.target.value)} autoFocus /></Fld>
+          <Fld label="What it is"><textarea style={{ ...S.textarea, height: 56 }} placeholder="Short description or what you use it for" value={form.what} onChange={e => set("what", e.target.value)} /></Fld>
+          <Fld label="Type"><Sel value={form.type} onChange={v => setForm(f => f.id ? { ...f, type: v } : { ...f, type: v, washEvery: APPLICATOR_USE_DEFAULTS[v][0], replaceAfter: APPLICATOR_USE_DEFAULTS[v][1] })} options={APPLICATOR_TYPES} /></Fld>
+          <Fld label="Brand"><input style={S.formInput} value={form.brand} onChange={e => set("brand", e.target.value)} /></Fld>
+          <Fld label="Price"><input style={S.formInput} placeholder="e.g. R149" value={form.price} onChange={e => set("price", e.target.value)} /></Fld>
+          <div style={S.formRow}>
+            <div style={{ flex: 1 }}><label style={S.formLabel}>Wash every (uses)</label><input type="number" min="0" style={S.formInput} value={form.washEvery} onChange={e => set("washEvery", e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label style={S.formLabel}>Replace after (uses)</label><input type="number" min="0" style={S.formInput} value={form.replaceAfter} onChange={e => set("replaceAfter", e.target.value)} /></div>
+          </div>
+          <div style={{ fontSize: 11, color: "#9a8e7a", margin: "-4px 0 12px" }}>Presets by type — change them to match how you use it. Leave 0 for no countdown.</div>
+          <div style={S.formRow}>
+            <div style={{ flex: 1 }}><label style={S.formLabel}>Last cleaned</label><input type="date" style={S.formInput} value={form.lastCleaned} max={today} onChange={e => set("lastCleaned", e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label style={S.formLabel}>Replace on</label><input type="date" style={S.formInput} value={form.replaceOn} onChange={e => set("replaceOn", e.target.value)} /></div>
+          </div>
+          <div style={S.modalBtns}><button style={S.cancelBtn} onClick={() => setForm(null)}>Cancel</button><button style={{ ...S.primaryBtn, flex: 1, opacity: ok ? 1 : 0.5 }} onClick={save}>Save</button></div>
+        </Overlay>
+      )}
+    </div>
+  );
+}
+
+// ─── Shaving tracker (Body) ────────────────────────────────────
+const SHAVE_AREAS = ["Legs", "Underarms", "Bikini", "Arms", "Face", "Other"];
+const SHAVE_REACTIONS = ["None", "Mild redness", "Razor burn", "Bumps", "Nicks"];
+
+function ShavingTracker() {
+  const [shaves, setShaves] = useLS("glow_shaving", []);
+  const [form, setForm] = useState(null);
+  const [filter, setFilter] = useState("All");
+  const today = todayStr();
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const toggleArea = (a) => setForm(f => ({ ...f, areas: f.areas.includes(a) ? f.areas.filter(x => x !== a) : [...f.areas, a] }));
+  const blank = () => ({ date: today, areas: [], tool: "", product: "", reaction: "None", notes: "" });
+  const sorted = [...shaves].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+  const shown = sorted.filter(s => filter === "All" || (s.areas || []).includes(filter));
+  const last = shown[0];
+  const since = last ? daysBetween(last.date, today) : null;
+  const month = today.slice(0, 7);
+  const thisMonth = shaves.filter(s => s.date.startsWith(month)).length;
+  const gaps = shown.slice(0, 6).map((s, i, arr) => arr[i + 1] ? daysBetween(arr[i + 1].date, s.date) : null).filter(g => g !== null);
+  const avgGap = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : null;
+  const ok = form && form.date && form.areas.length > 0;
+  const save = () => {
+    if (!ok) return;
+    const e = { ...form, tool: form.tool.trim(), product: form.product.trim(), notes: form.notes.trim() };
+    setShaves(p => e.id ? p.map(x => x.id === e.id ? e : x) : [...p, { ...e, id: uid() }]);
+    setForm(null);
+  };
+
+  return (
+    <div style={S.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ ...S.cardTitle, marginBottom: 0 }}>🪒 Shaving Tracker</div>
+        <button style={S.smallBtn} onClick={() => setForm(blank())}>+ Log shave</button>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <Sel value={filter} onChange={setFilter} options={["All", ...SHAVE_AREAS]} />
+      </div>
+      <div style={{ ...S.statsRow, marginBottom: 6 }}>
+        <div style={S.statBox}><div style={S.statNum}>{since === null ? "—" : since === 0 ? "Today" : `${since}d`}</div><div style={S.statLabel}>Since last shave</div></div>
+        <div style={S.statBox}><div style={S.statNum}>{thisMonth}</div><div style={S.statLabel}>This month</div></div>
+        <div style={S.statBox}><div style={S.statNum}>{avgGap === null ? "—" : `${avgGap}d`}</div><div style={S.statLabel}>Avg gap</div></div>
+      </div>
+      {shown.length === 0 && <div style={S.emptySmall}>No shaves logged yet</div>}
+      {shown.slice(0, 8).map(s => (
+        <div key={s.id} style={S.obsRow}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={S.obsDate}>{shortDate(s.date)}</span>
+              <span style={S.obsTag}>{(s.areas || []).join(", ")}</span>
+              {s.reaction && s.reaction !== "None" && <span style={{ ...S.obsTag, background: "#f5e6e0", color: "#8a4a3a" }}>{s.reaction}</span>}
+            </div>
+            {(s.tool || s.product) && <div style={S.ingrPreview}>{[s.tool, s.product].filter(Boolean).join(" · ")}</div>}
+            {s.notes && <div style={S.obsText}>{s.notes}</div>}
+          </div>
+          <button style={S.iconBtn} onClick={() => setForm(s)}>✎</button>
+          <button style={S.removeBtn} onClick={() => window.confirm("Delete this shave entry?") && setShaves(p => p.filter(x => x.id !== s.id))}>×</button>
+        </div>
+      ))}
+      {form && (
+        <Overlay close={() => setForm(null)}>
+          <div style={S.modalTitle}>🪒 {form.id ? "Edit" : "Log"} shave</div>
+          <Fld label="Date"><input type="date" style={S.formInput} value={form.date} max={today} onChange={e => set("date", e.target.value)} /></Fld>
+          <Fld label="Area(s)">
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {SHAVE_AREAS.map(a => <button key={a} style={{ ...S.filterChip, ...(form.areas.includes(a) ? S.filterChipActive : {}) }} onClick={() => toggleArea(a)}>{a}</button>)}
+            </div>
+          </Fld>
+          <Fld label="Razor / tool"><input style={S.formInput} placeholder="e.g. Gillette Venus" value={form.tool} onChange={e => set("tool", e.target.value)} /></Fld>
+          <Fld label="Shave product"><input style={S.formInput} placeholder="e.g. shaving cream, oil" value={form.product} onChange={e => set("product", e.target.value)} /></Fld>
+          <Fld label="Skin reaction"><Chips options={SHAVE_REACTIONS} value={form.reaction} onChange={v => set("reaction", v)} /></Fld>
+          <Fld label="Notes"><textarea style={{ ...S.textarea, height: 56 }} placeholder="Blade freshness, closeness, aftercare..." value={form.notes} onChange={e => set("notes", e.target.value)} /></Fld>
+          <div style={S.modalBtns}><button style={S.cancelBtn} onClick={() => setForm(null)}>Cancel</button><button style={{ ...S.primaryBtn, flex: 1, opacity: ok ? 1 : 0.5 }} onClick={save}>Save</button></div>
+        </Overlay>
+      )}
+    </div>
   );
 }
 
@@ -2487,7 +2947,7 @@ function PhotoLogPage({ photos, setModal, addPhoto, removePhoto, selDate }) {
 }
 
 // ─── Treatments Page ──────────────────────────────────────────
-function TreatmentsPage({ treatments, addTreatment, logTreatment, removeTreatment, setModal }) {
+function TreatmentsPage({ treatments, addTreatment, logTreatment, removeTreatment, updateTreatment, setModal }) {
   const today = todayStr();
   const getDueStatus = (t) => {
     if (!t.lastDone) return "due";
@@ -2526,6 +2986,7 @@ function TreatmentsPage({ treatments, addTreatment, logTreatment, removeTreatmen
                   </div>
                 </div>
                 <button style={{ ...S.dashedBtn, marginTop:10 }} onClick={() => logTreatment(t.id, today)}>✓ Mark done today</button>
+                <RatingGallery rating={t.rating} photos={t.photos} onChange={(patch) => updateTreatment(t.id, patch)} />
               </div>
             );
           })}
